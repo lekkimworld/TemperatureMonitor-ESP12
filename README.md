@@ -16,3 +16,11 @@ Use esptool to write firmware after compiling in Arduino IDE
 ```bash
 ./esptool.py --port /dev/cu.usbserial-A50285BI write_flash 0x00000 /var/folders/7b/m6y7lf294fvfbjy8kjqqd9lhxfhvry/T/arduino_build_38010/esp12_blink.ino.bin
 ```
+
+Use esptool.py to clear firmware using blank
+```bash
+./esptool.py --port /dev/cu.usbserial-A50285BI write_flash 0x00000 esp-01/boot_v1.7.bin 0x01000 esp-01/user1.1024.new.2.bin 0xfc000 esp-01/esp_init_data_default.bin 0x7e000 esp-01/blank.bin 0xfe000 esp-01/blank.bin
+```
+
+## esptool ##
+https://github.com/espressif/esptool
