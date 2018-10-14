@@ -9,8 +9,8 @@
 #define BLUELED_PIN 14
 #define GREENLED_PIN 16
 #define TEMP_PIN 12
-#define DELAY_POST_DATA 30000L          // delay between updates, in milliseconds
-#define DELAY_PRINT 15000L              // delay between printing to the console, in milliseconds
+#define DELAY_POST_DATA 15000L          // delay between updates, in milliseconds
+#define DELAY_PRINT 10000L              // delay between printing to the console, in milliseconds
 #define DELAY_READ 5000L                // delay between reading the sensor(s), in milliseconds
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
@@ -40,7 +40,16 @@ uint8_t reconnect;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Version: 2018-09-29T12:13 added yield");
+  Serial.println("Version: 2018-10-14T09:15 make config better in vars");
+  if (isProd) {
+    Serial.println("Config: PRODUCTION"); 
+    Serial.print("Server is: ");
+    Serial.println(serverProd);
+  } else {
+    Serial.println("Config: TEST");
+    Serial.print("Server is: ");
+    Serial.println(serverTest);
+  }
   pinMode(A0, INPUT);
   pinMode(WATCHDOG_PIN, INPUT); // set to high impedance
   digitalWrite(WATCHDOG_PIN, HIGH);
@@ -119,8 +128,10 @@ void loop() {
 
       // read data
       readTemperatures();
-      ldr = analogRead(A0);
-
+      if (useLdr) {
+        ldr = analogRead(A0);
+      }
+      
       // finish write and return to high impedance
       Serial.println("Patted watch dog...");
       digitalWrite(WATCHDOG_PIN, HIGH);
@@ -135,9 +146,11 @@ void loop() {
       digitalWrite(BLUELED_PIN, HIGH);
       
       printTemperatures();
-  
-      Serial.print("LDR Reading: "); 
-      Serial.println(ldr);
+
+      if (useLdr) {
+        Serial.print("LDR Reading: "); 
+        Serial.println(ldr);
+      }
     }
     yield();
     
@@ -196,17 +209,21 @@ char* preparePayload(char *content) {
     didAddSensors = true;
   }
 
-  // add ldr
-  char str_ldr[8];
-  ltoa(ldr, str_ldr, 10);
-  if (didAddSensors) {
-    strcat(content, ",");
+  if (useLdr) {
+    // add ldr
+    char str_ldr[8];
+    ltoa(ldr, str_ldr, 10);
+    if (didAddSensors) {
+      strcat(content, ",");
+    }
+    strcat(content, "{\"sensorId\": \"");
+    strcat(content, sensorId_Light);
+    strcat(content, "\", \"sensorValue\": ");
+    strcat(content, str_ldr);
+    strcat(content, "}");
   }
-  strcat(content, "{\"sensorId\": \"");
-  strcat(content, sensorId_Light);
-  strcat(content, "\", \"sensorValue\": ");
-  strcat(content, str_ldr);
-  strcat(content, "}");
+
+  // close payload
   strcat(content, "]}");
 
   // return
@@ -221,7 +238,11 @@ void sendData(char *data) {
   
   // send
   HTTPClient http;
-  http.begin(server);
+  if (isProd) {
+    http.begin(serverProd);
+  } else {
+    http.begin(serverTest);
+  }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Content-Length", str_contentLength);
   int httpCode = http.POST(data);

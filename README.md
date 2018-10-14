@@ -8,7 +8,16 @@ const char ssid1[]   = "wifi-ssid1";
 const char pass1[]   = "foo";
 const char ssid2[]   = "wifi-ssid2";
 const char pass2[]   = "bar";
-const char server[] = "http://boiling-tree-34283.herokuapp.com";
+
+// test or prod
+const boolean isProd = false;
+
+// servers
+const char serverProd = "http://boiling-tree-34283.herokuapp.com";
+const char serverTest = "http://trailing-sky-43213.herokuapp.com";
+
+// specify whether light sensor enabled and the sensor id
+const boolean useLdr = false;
 const char sensorId_Light[] = "outside_light";
 ```
 
