@@ -9,9 +9,6 @@
 #define BLUELED_PIN 14
 #define GREENLED_PIN 16
 #define TEMP_PIN 12
-#define DELAY_POST_DATA 15000L          // delay between updates, in milliseconds
-#define DELAY_PRINT 10000L              // delay between printing to the console, in milliseconds
-#define DELAY_READ 5000L                // delay between reading the sensor(s), in milliseconds
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
 #define DELAY_PAT_WATCHDOG 200L         // how long a watchdog pat lasts, in milliseconds
@@ -40,7 +37,7 @@ uint8_t reconnect;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Version: 2018-10-14T09:15 make config better in vars");
+  Serial.println("Version: 2019-01-94T19:05 always send deviceId");
   if (isProd) {
     Serial.println("Config: PRODUCTION"); 
     Serial.print("Server is: ");
@@ -189,8 +186,16 @@ void loop() {
 }
 
 char* preparePayload(char *content) {
+  // get your MAC address
+  byte mac[6];
+  char mac_addr[20];
+  WiFi.macAddress(mac);
+  sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+  
   // start json array
-  strcpy(content, "{\"msgtype\": \"data\", \"data\": [");
+  strcpy(content, "{\"msgtype\": \"data\", \"deviceId\": \"");
+  strcat(content, mac_addr);
+  strcat(content, "\", \"data\": [");
 
   // loop sensors
   boolean didAddSensors = false;
