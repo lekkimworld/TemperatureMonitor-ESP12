@@ -1,9 +1,11 @@
-# esp12-sensors-test
-Project to test running my required temperature sensors (ds18b20) and a light photo-resistor off an ESP-12 instead of a full Arduino
+# TemperatureMonitor-ESP12 #
+Project to test running my required temperature sensors (DS18B20), DHT22 temperature and humidity sensors and a light photo-resistor off an ESP-12 instead of a full Arduino.
 
-Remember to add vars.h to keep variables such as SSID of wi-fi plus passcode. The file also keeps the 
-sensorId transmitted for the light sensor as well as the webservice to post to. Below is an example file.
+Remember to add vars.h to keep variables such as SSID of wi-fi plus passcode. The file also keeps a define for the enabled sensor 
+types, sensorIds for those sensors without built in ID as well as the webservice to post to. Below is an example file.
 ```
+#include <Adafruit_Sensor.h>
+
 const char ssid1[]   = "wifi-ssid1";
 const char pass1[]   = "foo";
 const char ssid2[]   = "wifi-ssid2";
