@@ -1,3 +1,4 @@
+#include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
 #include <ESP8266WiFi.h>
@@ -5,6 +6,7 @@
 #include <ESP8266HTTPClient.h>
 #include <OneWire.h> 
 #include <DallasTemperature.h>
+#include "wifi.h"
 #include "vars.h"
 
 #define VERSION_NUMBER "20190224T1518"

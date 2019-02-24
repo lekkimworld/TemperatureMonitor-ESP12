@@ -1,16 +1,17 @@
 # TemperatureMonitor-ESP12 #
 Project to test running my required temperature sensors (DS18B20), DHT22 temperature and humidity sensors and a light photo-resistor off an ESP-12 instead of a full Arduino.
 
-Remember to add vars.h to keep variables such as SSID of wi-fi plus passcode. The file also keeps a define for the enabled sensor 
-types, sensorIds for those sensors without built in ID as well as the webservice to post to. Below is an example file.
-```
-#include <Adafruit_Sensor.h>
+Remember to add `wifi.h` to to keeo Wi-Fi related configuration such as SSID of wi-fi plus passcode. The `vars.h` file keeps defines for the enabled sensor types, sensorIds for those sensors without built in ID as well as the webservice to post to. Below are an example files.
 
+## wifi.h ##
+```
 const char ssid1[]   = "wifi-ssid1";
 const char pass1[]   = "foo";
 const char ssid2[]   = "wifi-ssid2";
 const char pass2[]   = "bar";
-
+```
+## vars.h ##
+```
 // test or prod
 const boolean isProd = false;
 
