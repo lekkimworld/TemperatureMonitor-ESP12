@@ -1,6 +1,5 @@
 #include <DHT.h>
 #include <DHT_U.h>
-
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
@@ -8,8 +7,8 @@
 #include <DallasTemperature.h>
 #include "vars.h"
 
-#define VERSION_NUMBER "20190125T1147"
-#define VERSION_LASTCHANGE "Add DHT22 sensor and refactor code"
+#define VERSION_NUMBER "20190224T1518"
+#define VERSION_LASTCHANGE "Change from ESP.reset to ESP.restart if no wifi connection can be made"
 
 #define WATCHDOG_PIN 13                 // pin where we connect to a 555 timer watch dog circuit
 #define BLUELED_PIN 14
@@ -115,8 +114,8 @@ void loop() {
       Serial.print(reconnect);
       Serial.println(")...");
       if (reconnect >= 3) {
-        Serial.println("Resetting...");
-        ESP.reset();
+        Serial.println("Restarting...");
+        ESP.restart();
         return;
       }
     }
