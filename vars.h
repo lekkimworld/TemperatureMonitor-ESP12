@@ -15,7 +15,7 @@ const char serverTest[] = "http://boiling-dusk-12267.herokuapp.com";
 #define DS18B20_PIN 12
 
 // enable DHT22 on pin 4 with specified deviceID's
-#define SENSORTYPE_DHT22
+// #define SENSORTYPE_DHT22
 #define DHT_PIN 4
 #define DHT_TYPE DHT22
 #define SENSORID_DHT22_TEMP "stue_dht_temp"

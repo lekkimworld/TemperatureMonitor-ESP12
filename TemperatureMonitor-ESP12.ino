@@ -73,6 +73,8 @@ void setup() {
     Serial.print("Server is: ");
     Serial.println(serverTest);
   }
+  printMacAddress();
+
   pinMode(WATCHDOG_PIN, INPUT); // set to high impedance
   digitalWrite(WATCHDOG_PIN, HIGH);
   pinMode(BLUELED_PIN, OUTPUT);
@@ -132,7 +134,7 @@ void loop() {
       byte mac[6];
       char mac_addr[20];
       WiFi.macAddress(mac);
-      sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+      sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
       // build payload
       char payload[128];
@@ -256,7 +258,7 @@ void printMacAddress() {
   
   // print MAC address
   char buf[20];
-  sprintf(buf, "%02X:%02X:%02X:%02X:%02X:%02X", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+  sprintf(buf, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   Serial.print("MAC address: ");
   Serial.println(buf);
 }
@@ -266,7 +268,7 @@ char* preparePayload(char *content) {
   byte mac[6];
   char mac_addr[20];
   WiFi.macAddress(mac);
-  sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+  sprintf(mac_addr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   
   // start json array
   strcpy(content, "{\"msgtype\": \"data\", \"deviceId\": \"");
