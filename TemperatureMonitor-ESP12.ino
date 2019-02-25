@@ -34,6 +34,7 @@ boolean startedPrint = false;
 boolean startedPostData = false;
 boolean justReset = true;
 uint8_t reconnect;
+uint8_t sensorCount = 0;
 
 // ldr
 #ifdef SENSORTYPE_LDR
@@ -45,7 +46,6 @@ uint8_t reconnect;
   OneWire oneWire(DS18B20_PIN);
   DallasTemperature sensors(&oneWire);
   
-  uint8_t sensorCount = 0;
   DeviceAddress addresses[MAX_TEMP_SENSOR_COUNT];
   float temperatures[MAX_TEMP_SENSOR_COUNT];
 #endif
@@ -446,6 +446,7 @@ void initSensor_DHT22() {
 }
 
 void readData_DHT22() {
+  sensorCount = 1;
   sensors_event_t event_temp;
   dht.temperature().getEvent(&event_temp);
   dht22_temp = event_temp.temperature;
@@ -474,6 +475,7 @@ void initSensor_LDR() {
 }
 
 void readData_LDR() {
+  sensorCount = 1;
   ldr = analogRead(LDR_PIN);
 }
 
