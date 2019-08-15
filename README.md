@@ -1,15 +1,22 @@
 # TemperatureMonitor-ESP12 #
 Project to test running my required temperature sensors (DS18B20), DHT22 temperature and humidity sensors and a light photo-resistor off an ESP-12 instead of a full Arduino.
 
-Remember to add `wifi.h` to to keeo Wi-Fi related configuration such as SSID of wi-fi plus passcode. The `vars.h` file keeps defines for the enabled sensor types, sensorIds for those sensors without built in ID as well as the webservice to post to. Below are an example files.
+Remember to use `ethernet_config.h` or `wifi_config.h` to configure networking and to keep network related configuration such as mac address (for ethernet), SSID of wi-fi plus passcode out of the source repo. The `vars.h` file keeps defines for the enabled sensor types, sensorIds for those sensors without built in ID as well as the webservice to post to. Below are an example files.
 
-## wifi.h ##
+## wifi_config.h ##
 ```
 const char ssid1[]   = "wifi-ssid1";
 const char pass1[]   = "foo";
 const char ssid2[]   = "wifi-ssid2";
 const char pass2[]   = "bar";
 ```
+
+## ethernet_config.h ##
+```
+#define NETWORK_ETHERNET
+const byte ethernetMac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x00 };
+```
+
 ## vars.h ##
 ```
 // test or prod
@@ -21,7 +28,7 @@ const char serverTest = "http://trailing-sky-43213.herokuapp.com";
 
 // enable DS18B20 on pin 12
 #define SENSORTYPE_DS18B20
-#define DS18B20_PIN 12
+const uint8_t DS18B20_PINS[] = {8, 9};
 
 // enable DHT22 on pin 4 with specified deviceID's
 #define SENSORTYPE_DHT22
