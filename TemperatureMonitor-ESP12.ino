@@ -332,7 +332,6 @@ void loop() {
     preparePayload(payload);
     
     // send payload
-    Serial.println(payload);
     sendData(payload);
   }
   yield();
