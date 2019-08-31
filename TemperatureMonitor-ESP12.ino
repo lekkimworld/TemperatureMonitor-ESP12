@@ -561,20 +561,21 @@ void readData_DS18B20() {
       Serial.println(sensorCountNew);
       sensorCount = sensorCountNew;
       sensorCounts[i] = sensorCountNew;
-  
-      if (sensorCount > 0) {
-        // set resolution
-        sensors.setResolution(TEMPERATURE_PRECISION);
-        
-        // request temperatures and store
-        sensors.requestTemperatures();
+    }
+
+    // read temperaturs
+    if (sensorCount > 0) {
+      // set resolution
+      sensors.setResolution(TEMPERATURE_PRECISION);
       
-        // get addresses
-        for (uint8_t j=0; j<sensorCount; j++) {
-          sensors.getAddress(addresses[indexTempAddress], j);
-          temperatures[indexTempAddress] = sensors.getTempCByIndex(j);
-          indexTempAddress++;
-        }
+      // request temperatures and store
+      sensors.requestTemperatures();
+    
+      // get addresses
+      for (uint8_t j=0; j<sensorCount; j++) {
+        sensors.getAddress(addresses[indexTempAddress], j);
+        temperatures[indexTempAddress] = sensors.getTempCByIndex(j);
+        indexTempAddress++;
       }
     }
   }
