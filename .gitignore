@@ -1,6 +1,4 @@
-wifi.h
 .nyc_output
 coverage
 output
-wifi_config.h
-ethernet_config.h
+network_config.h

@@ -1,6 +1,5 @@
 #include "vars.h"
-#include "ethernet_config.h"
-#include "wifi_config.h"
+#include "network_config.h"
 #ifdef SENSORTYPE_DS18B20
   #include <Adafruit_Sensor.h>
   #include <OneWire.h> 
@@ -20,19 +19,18 @@
   #include <ESP8266HTTPClient.h>
 #endif
 
-#define VERSION_NUMBER "20190830T2300"
-#define VERSION_LASTCHANGE "Add support for DS18B20 sensors to multiple pins"
+#define VERSION_NUMBER "20191226T1036"
+#define VERSION_LASTCHANGE "Verified that code works on ESP12"
 
-#define WATCHDOG_PIN 13                 // pin where we connect to a 555 timer watch dog circuit
-#define BLUELED_PIN 14
-#define GREENLED_PIN 16
+//#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
+//#define PIN_PRINT_LED 14
+//#define PIN_HTTP_LED 16
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect or if no ethernet link, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
 #define DELAY_PAT_WATCHDOG 200L         // how long a watchdog pat lasts, in milliseconds
-#define MAX_TEMP_SENSOR_COUNT 10         // maximum of DS18B20 sensors we can connect
+#define MAX_DS18B20_SENSORS 10         // maximum of DS18B20 sensors we can connect
 #define TEMP_DECIMALS 4                 // 4 decimals of output
 #define HUM_DECIMALS 4                  // 4 decimals of output
-#define TEMPERATURE_PRECISION 12        // 12 bits precision
 
 // **** WiFi *****
 #ifdef NETWORK_WIFI
@@ -52,12 +50,13 @@ boolean startedPrint = false;
 boolean startedPostData = false;
 boolean justReset = true;
 uint8_t reconnect;
+uint8_t sensorCount = 0;
 
 // ds18b20
 #ifdef SENSORTYPE_DS18B20
   uint8_t sensorCounts[sizeof(DS18B20_PINS)/sizeof(uint8_t)];
-  DeviceAddress addresses[MAX_TEMP_SENSOR_COUNT];
-  float temperatures[MAX_TEMP_SENSOR_COUNT];
+  DeviceAddress addresses[MAX_DS18B20_SENSORS];
+  float temperatures[MAX_DS18B20_SENSORS];
 #endif
 
 // ldr
@@ -90,12 +89,18 @@ void setup() {
   }
   printMacAddress();
 
-  pinMode(WATCHDOG_PIN, INPUT); // set to high impedance
-  digitalWrite(WATCHDOG_PIN, HIGH);
-  pinMode(BLUELED_PIN, OUTPUT);
-  digitalWrite(BLUELED_PIN, LOW);
-  pinMode(GREENLED_PIN, OUTPUT);
-  digitalWrite(GREENLED_PIN, LOW);
+  #ifdef PIN_WATCHDOG
+  pinMode(PIN_WATCHDOG, INPUT); // set to high impedance
+  digitalWrite(PIN_WATCHDOG, HIGH);
+  #endif
+  #ifdef PIN_PRINT_LED
+  pinMode(PIN_PRINT_LED, OUTPUT);
+  digitalWrite(PIN_PRINT_LED, LOW);
+  #endif
+  #ifdef PIN_HTTP_LED
+  pinMode(PIN_HTTP_LED, OUTPUT);
+  digitalWrite(PIN_HTTP_LED, LOW);
+  #endif
 
   yield();
   #ifdef SENSORTYPE_DS18B20
@@ -135,17 +140,6 @@ void getMacAddressString(char *buffer) {
   byte mac[6];
   getMacAddress(mac);
   sprintf(buffer, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-/**
- * Get total DS18B20 sensor count across pins.
- */
-uint8_t getDS18B20SensorCount() {
-  uint8_t result = 0;
-  for (uint8_t i=0; i<sizeof(DS18B20_PINS)/sizeof(uint8_t); i++) {
-    result += sensorCounts[i];
-  }
-  return result;
 }
 
 /**
@@ -231,6 +225,7 @@ bool isConnectedToNetwork() {
 
 void loop() {
   if (!isConnectedToNetwork()) {
+    Serial.println("No network connected...");
     return;
   }
   
@@ -256,19 +251,11 @@ void loop() {
 
   // reset reconnect count
   reconnect = 0;
+
+  // read from sensor(s)
   if (!startedRead && (millis() - lastRead) > DELAY_READ) {
     lastRead = millis();
     startedRead = true;
-
-    // pat the watchdog
-    pinMode(WATCHDOG_PIN, OUTPUT);
-    digitalWrite(WATCHDOG_PIN, LOW);
-  }
-  yield();
-  
-  if (startedRead && (millis() - lastRead) > DELAY_PAT_WATCHDOG) {
-    lastRead = millis();
-    startedRead = false;
 
     // read ds18b20 data
     #ifdef SENSORTYPE_DS18B20
@@ -283,19 +270,35 @@ void loop() {
     #ifdef SENSORTYPE_LDR
       readData_LDR();
     #endif
-    
+
+    #ifdef PIN_WATCHDOG
+    // pat the watchdog
+    pinMode(PIN_WATCHDOG, OUTPUT);
+    digitalWrite(PIN_WATCHDOG, LOW);
+    #endif
+  }
+  yield();
+  
+  if (startedRead && (millis() - lastRead) > DELAY_PAT_WATCHDOG) {
+    lastRead = millis();
+    startedRead = false;
+
+    #ifdef PIN_WATCHDOG
     // finish write and return to high impedance
     Serial.println("Patted watch dog...");
-    digitalWrite(WATCHDOG_PIN, HIGH);
-    pinMode(DELAY_PAT_WATCHDOG, INPUT);
+    digitalWrite(PIN_WATCHDOG, HIGH);
+    pinMode(PIN_WATCHDOG, INPUT);
+    #endif
   }
   yield();
   
   if (!startedPrint && (millis() - lastPrint) > DELAY_PRINT) {
     lastPrint = millis();
     startedPrint = true;
-    
-    digitalWrite(BLUELED_PIN, HIGH);
+
+    #ifdef PIN_PRINT_LED
+    digitalWrite(PIN_PRINT_LED, HIGH);
+    #endif
 
     // show data on console
     printData();
@@ -305,8 +308,10 @@ void loop() {
   if (startedPrint && (millis() - lastPrint) > DELAY_BLINK) {
     startedPrint = false;
     lastPrint = millis();
-    
-    digitalWrite(BLUELED_PIN, LOW);
+
+    #ifdef PIN_PRINT_LED
+    digitalWrite(PIN_PRINT_LED, LOW);
+    #endif
   }
   yield();
 
@@ -315,8 +320,10 @@ void loop() {
     lastPostData = millis();
     startedPostData = true;
     
-    digitalWrite(GREENLED_PIN, HIGH);
-
+    #ifdef PIN_HTTP_LED
+    digitalWrite(PIN_HTTP_LED, HIGH);
+    #endif
+    
     // prepare post data
     uint8_t sensorCount = 0;
     #ifdef SENSORTYPE_DS18B20
@@ -339,8 +346,9 @@ void loop() {
   if (startedPostData && (millis() - lastPostData) > DELAY_BLINK) {
     startedPostData = false;
     lastPostData = millis();
-    
-    digitalWrite(GREENLED_PIN, LOW);
+    #ifdef PIN_HTTP_LED
+    digitalWrite(PIN_HTTP_LED, LOW);
+    #endif
   }
   yield();
 }
@@ -362,6 +370,7 @@ void printData() {
   #ifdef SENSORTYPE_LDR
      printData_LDR();
   #endif
+  Serial.println("Printed available data");
 }
 
 char* preparePayload(char *content) {
@@ -460,10 +469,7 @@ void sendData(char *data) {
   http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
   int httpCode = http.POST(data);
   String payload = http.getString();                  //Get the response payload
-
-  Serial.println(httpCode);   //Print HTTP return code
-  Serial.println(payload);    //Print request response payload
-
+  Serial.println(data);
   http.end();
 #endif
 
@@ -525,6 +531,17 @@ void initSensor_DS18B20() {
   Serial.println("> DS18B20 sensors");
 }
 
+/**
+ * Get total DS18B20 sensor count across pins.
+ */
+uint8_t getDS18B20SensorCount() {
+  uint8_t result = 0;
+  for (uint8_t i=0; i<sizeof(DS18B20_PINS)/sizeof(uint8_t); i++) {
+    result += sensorCounts[i];
+  }
+  return result;
+}
+
 char* ds18b20AddressToString(DeviceAddress deviceAddress) {
     static char return_me[18];
     static char *hex = "0123456789ABCDEF";
@@ -566,7 +583,7 @@ void readData_DS18B20() {
     // read temperaturs
     if (sensorCount > 0) {
       // set resolution
-      sensors.setResolution(TEMPERATURE_PRECISION);
+      sensors.setResolution(DS18B20_TEMP_PRECISION);
       
       // request temperatures and store
       sensors.requestTemperatures();
@@ -582,14 +599,15 @@ void readData_DS18B20() {
 }
 
 void printData_DS18B20() {
-  uint8_t sensorCount = getDS18B20SensorCount();
+  sensorCount = getDS18B20SensorCount();
   if (sensorCount > 0) {
     for (uint8_t i=0; i<sensorCount; i++) {
       Serial.print(ds18b20AddressToString(addresses[i]));
       Serial.print(": ");
       Serial.println(temperatures[i], TEMP_DECIMALS);
     }
-  }
+  } else {
+    Serial.println("No DS18B20 sensors found on bus");
 }
 #endif
 
