@@ -1,6 +1,7 @@
 #include "vars.h"
 #include "network_config.h"
 #include <ArduinoJson.h>
+#include <EEPROM.h>
 #ifdef SENSORTYPE_DS18B20
   #include <Adafruit_Sensor.h>
   #include <OneWire.h> 
@@ -17,10 +18,11 @@
 #ifdef NETWORK_WIFI
   #include <ESP8266WiFi.h>
   #include <ESP8266HTTPClient.h>
+  #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20191227T0936"
-#define VERSION_LASTCHANGE "Move to use ArduinoJson"
+#define VERSION_NUMBER "20191227T1900"
+#define VERSION_LASTCHANGE "Add web server and AP for wi-fi config saved in EEPROM"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -34,7 +36,12 @@
 
 // **** WiFi *****
 #ifdef NETWORK_WIFI
-  WiFiServer server(80);
+  ESP8266WebServer server(80);
+  
+  struct { 
+    char ssid[20] = "";
+    char password[20] = "";
+  } wifi_data;
 #endif
 #ifdef NETWORK_ETHERNET
   EthernetClient client;
@@ -72,22 +79,120 @@ uint8_t sensorCount = 0;
   float dht22_hum;
 #endif
 
+/**
+ * Get Mac address to use.
+ */
+void getMacAddress(byte *mac) {
+  #ifdef NETWORK_WIFI
+    WiFi.macAddress(mac);
+  #endif
+  #ifdef NETWORK_ETHERNET
+    mac = ethernetMac;
+  #endif
+}
+
+/**
+ * Convert mac address to a char buffer.
+ */
+void getMacAddressString(char *buffer) {
+  byte mac[6];
+  getMacAddress(mac);
+  sprintf(buffer, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+/**
+ * Convert mac address to a char buffer.
+ */
+void getMacAddressStringNoColon(char *buffer) {
+  byte mac[6];
+  getMacAddress(mac);
+  sprintf(buffer, "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+/**
+ * Print MAC address to serial console
+ */
+void printMacAddress() {
+  // print MAC address
+  char buf[20];
+  getMacAddressString(buf);
+  Serial.print("MAC address: ");
+  Serial.println(buf);
+}
+
+// *** WEB SERVER
+void webHandle_GetRoot() {
+  char response[1024];
+  strcpy(response, "<html><body><h1>SensorCentral - Wi-Fi Configuration!</h1><div>Current SSID: ");
+  strcat(response, wifi_data.ssid);
+  strcat(response, "</div><div>Current password: ");
+  strncat(response, wifi_data.password, 4);
+  strcat(response, "****");
+  strcat(response, "</div><div>Connection status: ");
+  strcat(response, WiFi.status() == WL_CONNECTED ? "Connected" : "NOT connected");
+  strcat(response, "</div><form method=\"post\" action=\"/wifi\">SSID: <input type=\"text\" name=\"ssid\"></input>Password: <input type=\"text\" name=\"password\"></input><input type=\"submit\"></input></form></body></html>");
+  server.send(200, "text/html", response);
+}
+
+void webHandle_PostWifiForm() {
+  if (!server.hasArg("ssid") || !server.hasArg("password") || server.arg("ssid") == NULL || server.arg("password") == NULL) {
+    server.send(417, "text/plain", "417: Invalid Request");
+    return;
+  }
+
+  // save to eeprom
+  server.arg("ssid").toCharArray(wifi_data.ssid, 20);
+  server.arg("password").toCharArray(wifi_data.password, 20);
+  EEPROM.put(0, wifi_data);
+  EEPROM.commit();
+
+  // send response
+  server.send(200, "text/html", "<html><body><h1>Wi-Fi</h1><div>SSID: " + server.arg("ssid") + "</div><div>Password: " + server.arg("password") + "</div></body></html>");
+
+  // restart esp
+  ESP.restart();
+}
+
+void webHandle_NotFound(){
+  server.send(404, "text/plain", "404: Not found");
+}
+
 void initNetworking() {
 #ifdef NETWORK_WIFI
-  WiFi.begin(ssid, pass);
+  // read config from eeprom
+  EEPROM.begin(512);
+  EEPROM.get(0, wifi_data);
+  Serial.println("Read data from EEPROM - ssid: " + String(wifi_data.ssid) + ", password: ****");
+  
+  // start AP
+  char ssid[32];
+  char mac_addr[18];
+  getMacAddressStringNoColon(mac_addr);
+  strcpy(ssid, "SensorCentral-");
+  strcat(ssid, mac_addr);
+  WiFi.softAP(ssid, "");
+  Serial.print("Started AP on IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // start web server
+  server.on("/", HTTP_GET, webHandle_GetRoot);
+  server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
+  server.onNotFound(webHandle_NotFound);  
+  server.begin();
+  Serial.println("Started web server on port 80");
+
+  // attempt to start wifi if we have config
+  WiFi.begin(wifi_data.ssid, wifi_data.password);
   Serial.print("Establishing WiFi connection");
   while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
+    delay(500);
+    server.handleClient();
     Serial.print(".");
   }
   Serial.println('\n');
   Serial.print("WiFi connection established - IP address: ");
   Serial.println(WiFi.localIP());
 
-  // start web server
-  server.begin();
-  Serial.println("Started web server on port 80");
-  
 #endif
 #ifdef NETWORK_ETHERNET
   // ensure ethernet library is initialized
@@ -237,38 +342,6 @@ void setup() {
 #endif
 }
 
-/**
- * Get Mac address to use.
- */
-void getMacAddress(byte *mac) {
-  #ifdef NETWORK_WIFI
-    WiFi.macAddress(mac);
-  #endif
-  #ifdef NETWORK_ETHERNET
-    mac = ethernetMac;
-  #endif
-}
-
-/**
- * Convert mac address to a char buffer.
- */
-void getMacAddressString(char *buffer) {
-  byte mac[6];
-  getMacAddress(mac);
-  sprintf(buffer, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-/**
- * Print MAC address to serial console
- */
-void printMacAddress() {
-  // print MAC address
-  char buf[20];
-  getMacAddressString(buf);
-  Serial.print("MAC address: ");
-  Serial.println(buf);
-}
-
 bool isConnectedToNetwork() {
 #ifdef NETWORK_WIFI
   // wifi
@@ -297,6 +370,16 @@ void debugWebServer(char* buffer) {
 }
 
 void loop() {
+#ifdef NETWORK_WIFI
+  // disable AP after 60 seconds
+  if (WiFi.softAPIP() && millis() > 60000) {
+    // diable AP
+    Serial.println("Disabling AP...");
+    WiFi.softAPdisconnect(false);
+    WiFi.enableAP(false);
+  }
+#endif
+
   if (!isConnectedToNetwork()) {
     Serial.println("No network connected...");
     return;
@@ -333,42 +416,8 @@ void loop() {
   reconnect = 0;
 
 #ifdef NETWORK_WIFI
-  WiFiClient client = server.available();
-  if (client) {
-    debugWebServer("New client connected");
-    bool currentLineIsBlank = true;
-    
-    while (client.connected()) {
-      if (client.available()) {
-        debugWebServer("Client data available");
-        char c = client.read(); // read a byte, then
-        Serial.write(c); // print it out the serial monitor
-        
-        if (c == '\n' && currentLineIsBlank) {
-          client.println("HTTP/1.0 200 OK");
-          client.println("Content-Type: text/plain");
-          client.println("Connection: close");
-          client.println();
-          client.println("HelloWorld...");
-          break;
-        }
-        if (c == '\n') {
-          // you're starting a new line
-          currentLineIsBlank = true;
-        } else if (c != '\r') {
-          // you've gotten a character on the current line
-          currentLineIsBlank = false;
-        }
-      }
-    }
-    
-    // give the web browser time to receive the data
-    delay(1);
-
-    // close the connection:
-    client.stop();
-    Serial.println("client disonnected");
-  }
+  // handle incoming request to web server
+  server.handleClient();
 
 #endif
 
