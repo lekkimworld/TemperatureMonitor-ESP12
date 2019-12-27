@@ -5,6 +5,9 @@ const boolean isProd = false;
 const char serverProd[] = "desolate-meadow-68880.herokuapp.com";
 const char serverTest[] = "boiling-dusk-12267.herokuapp.com";
 
+// debug
+#define WEBSERVER_DEBUG
+
 // delays
 #define DELAY_POST_DATA 120000L          // delay between updates, in milliseconds
 #define DELAY_PRINT 10000L              // delay between printing to the console, in milliseconds

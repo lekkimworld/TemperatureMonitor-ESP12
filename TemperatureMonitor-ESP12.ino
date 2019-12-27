@@ -1,5 +1,6 @@
 #include "vars.h"
 #include "network_config.h"
+#include <ArduinoJson.h>
 #ifdef SENSORTYPE_DS18B20
   #include <Adafruit_Sensor.h>
   #include <OneWire.h> 
@@ -15,12 +16,11 @@
 #endif
 #ifdef NETWORK_WIFI
   #include <ESP8266WiFi.h>
-  #include <ESP8266WiFiMulti.h>
   #include <ESP8266HTTPClient.h>
 #endif
 
-#define VERSION_NUMBER "20191226T1036"
-#define VERSION_LASTCHANGE "Verified that code works on ESP12"
+#define VERSION_NUMBER "20191227T0936"
+#define VERSION_LASTCHANGE "Move to use ArduinoJson"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -34,7 +34,7 @@
 
 // **** WiFi *****
 #ifdef NETWORK_WIFI
-  ESP8266WiFiMulti WiFiMulti;
+  WiFiServer server(80);
 #endif
 #ifdef NETWORK_ETHERNET
   EthernetClient client;
@@ -72,6 +72,118 @@ uint8_t sensorCount = 0;
   float dht22_hum;
 #endif
 
+void initNetworking() {
+#ifdef NETWORK_WIFI
+  WiFi.begin(ssid, pass);
+  Serial.print("Establishing WiFi connection");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println('\n');
+  Serial.print("WiFi connection established - IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // start web server
+  server.begin();
+  Serial.println("Started web server on port 80");
+  
+#endif
+#ifdef NETWORK_ETHERNET
+  // ensure ethernet library is initialized
+  if (!didEthernetBegin) {
+    Serial.println("Initializing ethernet library");
+    if (Ethernet.begin(ethernetMac) == 0) {
+      Serial.println("Failed to configure Ethernet using DHCP...");
+      if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+        Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+        while (true) {
+          delay(1); // do nothing, no point running without Ethernet hardware
+        }
+      }
+      if (Ethernet.linkStatus() == LinkOFF) {
+        Serial.println("Ethernet cable is not connected...");
+        delay(DELAY_CONNECT_ATTEMPT);
+        return false;
+      }
+    }
+    // give the Ethernet shield a second to initialize:
+    delay(1000);
+    
+    // toggle flag
+    didEthernetBegin = true;
+  }
+  
+  // ensure continued DHCP lease
+  if (Ethernet.maintain() != 0) {
+    Serial.print("Received new DHCP address: ");
+    Serial.println(Ethernet.localIP());
+  }
+#endif
+}
+
+void sendData(char* data) {
+  // prepare headers
+  uint16_t contentLength = strlen(data) + 4;
+  char str_contentLength[4];
+  sprintf (str_contentLength, "%03i", contentLength);
+  
+#ifdef NETWORK_WIFI
+  // send
+  HTTPClient http;
+  char server[50];
+  strcpy(server, "http://");
+  if (isProd) {
+    strcat(server, serverProd);
+  } else {
+    strcat(server, serverTest);
+  }
+  http.begin(server);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Content-Length", str_contentLength);
+  http.addHeader("X-SensorCentral-Version", VERSION_NUMBER);
+  http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
+  int httpCode = http.POST(data);
+  String payload = http.getString();                  //Get the response payload
+  
+  http.end();
+#endif
+
+#ifdef NETWORK_ETHERNET
+  const char *server = isProd ? serverProd : serverTest;
+  if (client.connect(server, 80)) {
+    // post data
+    client.println("POST / HTTP/1.0");
+    client.print  ("Host: "); client.println(server);
+    client.println("Content-Type: application/json");
+    client.print  ("Content-Length: "); client.println(str_contentLength);
+    client.print  ("X-SensorCentral-Version: "); client.println(VERSION_NUMBER);
+    client.print  ("X-SensorCentral-LastChange: "); client.println(VERSION_LASTCHANGE);
+    client.println("Connection: close");
+    client.println();
+    client.println(data);
+    client.println();
+    client.flush();
+
+    int len = client.available();
+    if (len > 0) {
+      byte buffer[80];
+      if (len > 80) len = 80;
+      client.read(buffer, len);
+      Serial.write(buffer, len); // show in the serial monitor (slows some boards)
+      
+    }
+  } else {
+    // if you didn't get a connection to the server:
+    Serial.println("connection failed");
+  }
+  client.stop();
+#endif
+
+  // done
+  Serial.println("Sent to server...");
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.print("Version: ");
@@ -89,36 +201,40 @@ void setup() {
   }
   printMacAddress();
 
-  #ifdef PIN_WATCHDOG
+  // init networking
+  initNetworking();
+
+  // init pins
+#ifdef PIN_WATCHDOG
   pinMode(PIN_WATCHDOG, INPUT); // set to high impedance
   digitalWrite(PIN_WATCHDOG, HIGH);
-  #endif
-  #ifdef PIN_PRINT_LED
+#endif
+#ifdef PIN_PRINT_LED
   pinMode(PIN_PRINT_LED, OUTPUT);
   digitalWrite(PIN_PRINT_LED, LOW);
-  #endif
-  #ifdef PIN_HTTP_LED
+#endif
+#ifdef PIN_HTTP_LED
   pinMode(PIN_HTTP_LED, OUTPUT);
   digitalWrite(PIN_HTTP_LED, LOW);
-  #endif
+#endif
 
   yield();
-  #ifdef SENSORTYPE_DS18B20
-    // initialize DS18B20 temp sensors
-    initSensor_DS18B20();
-    yield();
-  #endif
+#ifdef SENSORTYPE_DS18B20
+  // initialize DS18B20 temp sensors
+  initSensor_DS18B20();
+  yield();
+#endif
 
-  #ifdef SENSORTYPE_DHT22
-    // initialize DHT22 temp sensor
-    initSensor_DHT22();
-    yield();
-  #endif
+#ifdef SENSORTYPE_DHT22
+  // initialize DHT22 temp sensor
+  initSensor_DHT22();
+  yield();
+#endif
 
-  #ifdef SENSORTYPE_LDR
-    initSensor_LDR();
-    yield();
-  #endif
+#ifdef SENSORTYPE_LDR
+  initSensor_LDR();
+  yield();
+#endif
 }
 
 /**
@@ -156,70 +272,27 @@ void printMacAddress() {
 bool isConnectedToNetwork() {
 #ifdef NETWORK_WIFI
   // wifi
-  wl_status_t status = WiFi.status();
-  if (status != WL_CONNECTED && ((unsigned long)millis() - lastConnectAttempt > DELAY_CONNECT_ATTEMPT)) {
-    // not connected - init wifi
-    WiFi.mode(WIFI_STA);
-    WiFiMulti.addAP(ssid1, pass1);
-    if (strlen(ssid2) > 0) {
-      WiFiMulti.addAP(ssid2, pass2);
-    }
-    Serial.println("Not connected attempting reconnect...");
-    lastConnectAttempt = millis();
-    if (WiFiMulti.run() != WL_CONNECTED) {
-      reconnect++;
-      Serial.print("Could not reconnect (attempt: ");
-      Serial.print(reconnect);
-      Serial.println(")...");
-      if (reconnect >= 3) {
-        Serial.println("Restarting...");
-        ESP.restart();
-        return false;
-      }
-    }
-    
-  } else if (status == WL_CONNECTED) {
-    return true;
+  if (WiFi.status() != WL_CONNECTED) {
+    initNetworking();
   }
+  return true;
 #endif
 
 #ifdef NETWORK_ETHERNET
-  // ensure ethernet library is initialized
-  if (!didEthernetBegin) {
-    Serial.println("Initializing ethernet library");
-    if (Ethernet.begin(ethernetMac) == 0) {
-      Serial.println("Failed to configure Ethernet using DHCP...");
-      if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-        Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
-        while (true) {
-          delay(1); // do nothing, no point running without Ethernet hardware
-        }
-      }
-      if (Ethernet.linkStatus() == LinkOFF) {
-        Serial.println("Ethernet cable is not connected...");
-        delay(DELAY_CONNECT_ATTEMPT);
-        return false;
-      }
-    }
-    // give the Ethernet shield a second to initialize:
-    delay(1000);
-
-    // we're connected
-    Serial.print("Ethernet assigned IP by DHCP: ");
-    Serial.println(Ethernet.localIP());
-    
-    // toggle flag
-    didEthernetBegin = true;
-  }
-  
   // ensure continued DHCP lease
   if (Ethernet.maintain() != 0) {
     Serial.print("Received new DHCP address: ");
     Serial.println(Ethernet.localIP());
   }
-
   // return
   return true;
+#endif
+}
+
+void debugWebServer(char* buffer) {
+#ifdef WEBSERVER_DEBUG
+  Serial.print("WEBSERVER_DEBUG: ");
+  Serial.println(buffer);
 #endif
 }
 
@@ -239,18 +312,66 @@ void loop() {
     getMacAddressString(mac_addr);
 
     // build payload
-    char payload[128];
-    strcpy(payload, "{\"msgtype\": \"control\", \"data\": {\"restart\": true, \"deviceId\": \"");
-    strcat(payload, mac_addr);
-    strcat(payload, "\"}}");
+    StaticJsonDocument<256> doc;
+    doc["msgtype"] = "control";
+    JsonObject jsonData = doc.createNestedObject("data"); 
+    jsonData["restart"] = true;
+    jsonData["deviceId"].set(mac_addr);
+
+    // serialize
+    uint8_t jsonLength = measureJson(doc) + 1; 
+    char jsonBuffer[jsonLength];
+    serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
     
     // send payload
-    sendData(payload);
+    sendData(jsonBuffer);
+    yield();
   }
-  yield();
+  
 
   // reset reconnect count
   reconnect = 0;
+
+#ifdef NETWORK_WIFI
+  WiFiClient client = server.available();
+  if (client) {
+    debugWebServer("New client connected");
+    bool currentLineIsBlank = true;
+    
+    while (client.connected()) {
+      if (client.available()) {
+        debugWebServer("Client data available");
+        char c = client.read(); // read a byte, then
+        Serial.write(c); // print it out the serial monitor
+        
+        if (c == '\n' && currentLineIsBlank) {
+          client.println("HTTP/1.0 200 OK");
+          client.println("Content-Type: text/plain");
+          client.println("Connection: close");
+          client.println();
+          client.println("HelloWorld...");
+          break;
+        }
+        if (c == '\n') {
+          // you're starting a new line
+          currentLineIsBlank = true;
+        } else if (c != '\r') {
+          // you've gotten a character on the current line
+          currentLineIsBlank = false;
+        }
+      }
+    }
+    
+    // give the web browser time to receive the data
+    delay(1);
+
+    // close the connection:
+    client.stop();
+    Serial.println("client disonnected");
+  }
+
+#endif
+
 
   // read from sensor(s)
   if (!startedRead && (millis() - lastRead) > DELAY_READ) {
@@ -325,21 +446,10 @@ void loop() {
     #endif
     
     // prepare post data
-    uint8_t sensorCount = 0;
-    #ifdef SENSORTYPE_DS18B20
-    sensorCount += getDS18B20SensorCount();
-    #endif
-    #ifdef SENSORTYPE_DHT22
-    sensorCount++;
-    #endif
-    #ifdef SENSORTYPE_LDR
-    sensorCount++;
-    #endif
-    char payload[2 + (sensorCount * 70) + 70 + 40];
-    preparePayload(payload);
+    char* jsonData = preparePayload();
     
     // send payload
-    sendData(payload);
+    sendData(jsonData);
   }
   yield();
 
@@ -370,35 +480,31 @@ void printData() {
   #ifdef SENSORTYPE_LDR
      printData_LDR();
   #endif
+    
   Serial.println("Printed available data");
 }
 
-char* preparePayload(char *content) {
+char* preparePayload() {
+  // create document
+  StaticJsonDocument<1024> doc;
+  
   // get your MAC address
   char mac_addr[20];
   getMacAddressString(mac_addr);
-  
-  // start json array
-  strcpy(content, "{\"msgtype\": \"data\", \"deviceId\": \"");
-  strcat(content, mac_addr);
-  strcat(content, "\", \"data\": [");
-  boolean didAddSensors = false;
 
+  // build payload
+  doc["msgtype"] = "data";
+  doc["deviceId"].set(mac_addr);
+  JsonArray jsonData = doc.createNestedArray("data");
+  
   // loop DS18B20 sensors
   #ifdef SENSORTYPE_DS18B20
   char str_temp[8];
   for (uint8_t i=0, k=getDS18B20SensorCount(); i<k; i++) {
     dtostrf(temperatures[i], 6, TEMP_DECIMALS, str_temp);
-
-    if (i > 0 || didAddSensors) {
-      strcat(content, ",");
-    }
-    strcat(content, "{\"sensorId\": \"");
-    strcat(content, ds18b20AddressToString(addresses[i]));
-    strcat(content, "\", \"sensorValue\": ");
-    strcat(content, str_temp);
-    strcat(content, "}");
-    didAddSensors = true;
+    JsonObject jsonSensorData = jsonData.createNestedObject();
+    jsonSensorData["sensorId"] = ds18b20AddressToString(addresses[i]);
+    jsonSensorData["sensorValue"].set(str_temp);
   }
   #endif
 
@@ -408,104 +514,30 @@ char* preparePayload(char *content) {
     char str_dht_hum[8];
     dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_dht_temp);
     dtostrf(dht22_hum, 6, HUM_DECIMALS, str_dht_hum);
-    if (didAddSensors) {
-      strcat(content, ",");
-    }
-    strcat(content, "{\"sensorId\": \"");
-    strcat(content, SENSORID_DHT22_TEMP);
-    strcat(content, "\", \"sensorValue\": ");
-    strcat(content, str_dht_temp);
-    strcat(content, "}, {\"sensorId\": \"");
-    strcat(content, SENSORID_DHT22_HUM);
-    strcat(content, "\", \"sensorValue\": ");
-    strcat(content, str_dht_hum);
-    strcat(content, "}");
-    didAddSensors = true;
+
+    JsonObject jsonSensorData = jsonData.createNestedObject();
+    jsonSensorData["sensorId"] = SENSORID_DHT22_TEMP;
+    jsonSensorData["sensorValue"].set(str_dht_temp);
+    jsonSensorData = jsonData.createNestedObject();
+    jsonSensorData["sensorId"] = SENSORID_DHT22_HUM;
+    jsonSensorData["sensorValue"].set(str_dht_hum);
   #endif
 
   #ifdef SENSORTYPE_LDR
     // add ldr
     char str_ldr[8];
     ltoa(ldr, str_ldr, 10);
-    if (didAddSensors) {
-      strcat(content, ",");
-    }
-    strcat(content, "{\"sensorId\": \"");
-    strcat(content, SENSORID_LDR);
-    strcat(content, "\", \"sensorValue\": ");
-    strcat(content, str_ldr);
-    strcat(content, "}");
-    didAddSensors = true;
+    JsonObject jsonSensorData = jsonData.createNestedObject();
+    jsonSensorData["sensorId"] = SENSORID_LDR
+    jsonSensorData["sensorValue"].set(str_ldr);
   }
   #endif
 
-  // close payload
-  strcat(content, "]}");
-
-  // return
-  return content;
-}
-
-void sendData(char *data) {
-  // prepare headers
-  uint16_t contentLength = strlen(data) + 4;
-  char str_contentLength[4];
-  sprintf (str_contentLength, "%03i", contentLength);
-  
-#ifdef NETWORK_WIFI
-  // send
-  HTTPClient http;
-  char server[50];
-  strcpy(server, "http://");
-  if (isProd) {
-    strcat(server, serverProd);
-  } else {
-    strcat(server, serverTest);
-  }
-  http.begin(server);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Content-Length", str_contentLength);
-  http.addHeader("X-SensorCentral-Version", VERSION_NUMBER);
-  http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
-  int httpCode = http.POST(data);
-  String payload = http.getString();                  //Get the response payload
-  Serial.println(data);
-  http.end();
-#endif
-
-#ifdef NETWORK_ETHERNET
-  const char *server = isProd ? serverProd : serverTest;
-  if (client.connect(server, 80)) {
-    // post data
-    client.println("POST / HTTP/1.0");
-    client.print  ("Host: "); client.println(server);
-    client.println("Content-Type: application/json");
-    client.print  ("Content-Length: "); client.println(str_contentLength);
-    client.print  ("X-SensorCentral-Version: "); client.println(VERSION_NUMBER);
-    client.print  ("X-SensorCentral-LastChange: "); client.println(VERSION_LASTCHANGE);
-    client.println("Connection: close");
-    client.println();
-    client.println(data);
-    client.println();
-    client.flush();
-
-    int len = client.available();
-    if (len > 0) {
-      byte buffer[80];
-      if (len > 80) len = 80;
-      client.read(buffer, len);
-      Serial.write(buffer, len); // show in the serial monitor (slows some boards)
-      
-    }
-  } else {
-    // if you didn't get a connection to the server:
-    Serial.println("connection failed");
-  }
-  client.stop();
-#endif
-
-  // done
-  Serial.println("Sent to server...");
+  // serialize
+  uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
+  char jsonBuffer[jsonLength];
+  serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
+  return jsonBuffer;
 }
 
 // ******************** DS18B20
