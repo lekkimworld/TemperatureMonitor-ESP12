@@ -30,14 +30,23 @@
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect or if no ethernet link, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
 #define DELAY_PAT_WATCHDOG 200L         // how long a watchdog pat lasts, in milliseconds
-#define MAX_DS18B20_SENSORS 10         // maximum of DS18B20 sensors we can connect
+#define MAX_DS18B20_SENSORS 10          // maximum of DS18B20 sensors we can connect
 #define TEMP_DECIMALS 4                 // 4 decimals of output
 #define HUM_DECIMALS 4                  // 4 decimals of output
+
+// define struct to hold general config
+struct {
+  char endpoint[64] = "boiling-dusk-12267.herokuapp.com";
+  unsigned long delayPrint = 10000L;
+  unsigned long delayPoll = 10000L;
+  unsigned long delayPost = 120000L;
+} configuration;
 
 // **** WiFi *****
 #ifdef NETWORK_WIFI
   ESP8266WebServer server(80);
-  
+
+  // define struct to hold wifi configuration
   struct { 
     char ssid[20] = "";
     char password[20] = "";
@@ -189,7 +198,7 @@ void initNetworking() {
     server.handleClient();
     Serial.print(".");
   }
-  Serial.println('\n');
+  Serial.print("\n");
   Serial.print("WiFi connection established - IP address: ");
   Serial.println(WiFi.localIP());
 
@@ -238,11 +247,7 @@ void sendData(char* data) {
   HTTPClient http;
   char server[50];
   strcpy(server, "http://");
-  if (isProd) {
-    strcat(server, serverProd);
-  } else {
-    strcat(server, serverTest);
-  }
+  strcat(server, configuration.endpoint);
   http.begin(server);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Content-Length", str_contentLength);
@@ -295,15 +300,8 @@ void setup() {
   Serial.println(VERSION_NUMBER);
   Serial.print("Last change: ");
   Serial.println(VERSION_LASTCHANGE);
-  if (isProd) {
-    Serial.println("Config: PRODUCTION"); 
-    Serial.print("Server is: ");
-    Serial.println(serverProd);
-  } else {
-    Serial.println("Config: TEST");
-    Serial.print("Server is: ");
-    Serial.println(serverTest);
-  }
+  Serial.print("Server is: ");
+  Serial.println(configuration.endpoint);
   printMacAddress();
 
   // init networking
@@ -423,7 +421,7 @@ void loop() {
 
 
   // read from sensor(s)
-  if (!startedRead && (millis() - lastRead) > DELAY_READ) {
+  if (!startedRead && (millis() - lastRead) > configuration.delayPoll) {
     lastRead = millis();
     startedRead = true;
 
@@ -462,7 +460,7 @@ void loop() {
   }
   yield();
   
-  if (!startedPrint && (millis() - lastPrint) > DELAY_PRINT) {
+  if (!startedPrint && (millis() - lastPrint) > configuration.delayPrint) {
     lastPrint = millis();
     startedPrint = true;
 
@@ -486,7 +484,7 @@ void loop() {
   yield();
 
   // post
-  if (!startedPostData && (millis() - lastPostData) > DELAY_POST_DATA) {
+  if (!startedPostData && (millis() - lastPostData) > configuration.delayPost) {
     lastPostData = millis();
     startedPostData = true;
     
