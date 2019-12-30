@@ -21,13 +21,14 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20191227T1900"
-#define VERSION_LASTCHANGE "Add web server and AP for wi-fi config saved in EEPROM"
+#define VERSION_NUMBER "20191230T1230"
+#define VERSION_LASTCHANGE "Better web ui for config"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
 //#define PIN_HTTP_LED 16
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect or if no ethernet link, in milliseconds
+#define DELAY_TURNOFF_AP 300000L        // delay after restart before turning off access point, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
 #define DELAY_PAT_WATCHDOG 200L         // how long a watchdog pat lasts, in milliseconds
 #define MAX_DS18B20_SENSORS 10          // maximum of DS18B20 sensors we can connect
@@ -130,17 +131,92 @@ void printMacAddress() {
 }
 
 // *** WEB SERVER
+void initWebserver() {
+  server.on("/", HTTP_GET, webHandle_GetRoot);
+  server.on("/data.html", HTTP_GET, webHandle_GetData);
+  server.on("/sensorconfig.html", HTTP_GET, webHandle_GetSensorConfig);
+  server.on("/wificonfig.html", HTTP_GET, webHandle_GetWifiConfig);
+  server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
+  server.on("/styles.css", HTTP_GET, webHandle_GetStyles);
+  server.onNotFound(webHandle_NotFound);  
+  
+}
 void webHandle_GetRoot() {
-  char response[1024];
-  strcpy(response, "<html><body><h1>SensorCentral - Wi-Fi Configuration!</h1><div>Current SSID: ");
-  strcat(response, wifi_data.ssid);
-  strcat(response, "</div><div>Current password: ");
-  strncat(response, wifi_data.password, 4);
-  strcat(response, "****");
-  strcat(response, "</div><div>Connection status: ");
-  strcat(response, WiFi.status() == WL_CONNECTED ? "Connected" : "NOT connected");
-  strcat(response, "</div><form method=\"post\" action=\"/wifi\">SSID: <input type=\"text\" name=\"ssid\"></input>Password: <input type=\"text\" name=\"password\"></input><input type=\"submit\"></input></form></body></html>");
+  char response[600];
+  strcpy(response, "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"initial-scale=1.0\"><title>SensorCentral</title><link rel=\"stylesheet\" href=\"./styles.css\"></head><body><div class=\"position title\">Menu</div><div class=\"position menuitem\"><a href=\"./data.html\">Data</a></div><div class=\"position menuitem\"><a href=\"./sensorconfig.html\">Sensor Config.</a></div><div class=\"position menuitem\"><a href=\"./wificonfig.html\">Wi-Fi Config.</a></div>");
+  strcat(response, "<div class=\"position footer right\">");
+  strcat(response, VERSION_NUMBER);
+  strcat(response, "<br/>");
+  strcat(response, VERSION_LASTCHANGE);
+  strcat(response, "</div>");
+  strcat(response, "</body></html>");
   server.send(200, "text/html", response);
+}
+
+void webHandle_GetData() {
+  char str_dht_temp[8];
+  char str_dht_hum[8];
+  dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_dht_temp);
+  dtostrf(dht22_hum, 6, HUM_DECIMALS, str_dht_hum);
+  
+  char response[400];
+  strcpy(response, "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"initial-scale=1.0\"><title>SensorCentral</title><link rel=\"stylesheet\" href=\"./styles.css\"></head><body><div class=\"position\"><a href=\"./\">Back</a></div><div class=\"position title\">Data</div><div class=\"position menuitem\">");
+#ifdef SENSORTYPE_DS18B20
+  sensorCount = getDS18B20SensorCount();
+  if (sensorCount > 0) {
+    for (uint8_t i=0; i<sensorCount; i++) {
+      strcat(response, ds18b20AddressToString(addresses[i]));
+      strcat(response, ": ");
+      strcat(response, temperatures[i]);
+      strcat(response, "<br/>");
+    }
+  } else {
+    strcat(response, "No DS18B20 sensors found on bus");
+  }
+#endif
+#ifdef SENSORTYPE_DHT22
+  strcat(response, "Temperature: ");
+  strcat(response, str_dht_temp);
+  strcat(response, "&deg;C<br/>Humidity: ");
+  strcat(response, str_dht_hum);
+#endif
+  strcat(response, "%</div></body></html>");
+  server.send(200, "text/html", response);
+}
+
+void webHandle_GetSensorConfig() {
+  
+}
+
+void webHandle_GetWifiConfig() {
+  char response[1024];
+  strcpy(response, "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"initial-scale=1.0\"><title>SensorCentral</title><link rel=\"stylesheet\" href=\"./styles.css\"></head><body><div class=\"position\"><a href=\"./\">Back</a></div><div class=\"position title\">Wi-Fi Config.</div><div class=\"position menuitem\">");
+  strcat(response, "<p>");
+  strcat(response, "Current SSID: "); strcat(response, wifi_data.ssid); strcat(response, "<br/>");
+  strcat(response, "Current Password: "); strncat(response, wifi_data.password, 4); strcat(response, "****<br/>");
+  strcat(response, "Status: "); strcat(response, WiFi.status() == WL_CONNECTED ? "Connected" : "NOT connected");
+  strcat(response, "</p>");
+  strcat(response, "<form method=\"post\" action=\"/wifi\">");
+  strcat(response, "<table border=\"0\">");
+  strcat(response, "<tr><td align=\"left\">SSID</td><td><input type=\"text\" name=\"ssid\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td>Password</td><td><input type=\"text\" name=\"password\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td colspan=\"2\" align=\"right\"><input type=\"submit\"></input></td></tr>");
+  strcat(response, "</table>");
+  strcat(response, "</div></body></html>");
+  server.send(200, "text/html", response);
+}
+
+void webHandle_GetStyles() {
+  char response[400];
+  strcpy(response, "* {font-size: 14pt;}");
+  strcat(response, "a {font-weight: bold;}");
+  strcat(response, "table {margin-left:auto;margin-right:auto;}");
+  strcat(response, ".position {width: 60%; margin-bottom: 10px; position: relative; margin-left: auto; margin-right: auto;}");
+  strcat(response, ".title {text-align: center; font-weight: bold; font-size: 20pt;}");
+  strcat(response, ".right {text-align: right;}");
+  strcat(response, ".footer {font-size: 10pt; font-style: italic;}");
+  strcat(response, ".menuitem {text-align: center; background-color: #efefef; cursor: pointer; border: 1px solid black;}");
+  server.send(200, "text/css", response);
 }
 
 void webHandle_PostWifiForm() {
@@ -184,9 +260,7 @@ void initNetworking() {
   Serial.println(WiFi.softAPIP());
 
   // start web server
-  server.on("/", HTTP_GET, webHandle_GetRoot);
-  server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
-  server.onNotFound(webHandle_NotFound);  
+  initWebserver();
   server.begin();
   Serial.println("Started web server on port 80");
 
@@ -369,8 +443,8 @@ void debugWebServer(char* buffer) {
 
 void loop() {
 #ifdef NETWORK_WIFI
-  // disable AP after 60 seconds
-  if (WiFi.softAPIP() && millis() > 60000) {
+  // disable AP 
+  if (WiFi.softAPIP() && millis() > DELAY_TURNOFF_AP) {
     // diable AP
     Serial.println("Disabling AP...");
     WiFi.softAPdisconnect(false);
@@ -687,7 +761,7 @@ void printData_DS18B20() {
     }
   } else {
     Serial.println("No DS18B20 sensors found on bus");
-}
+  }
 #endif
 
 // ******************** DHT22
