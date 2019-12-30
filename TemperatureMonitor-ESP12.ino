@@ -21,8 +21,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20191230T1530"
-#define VERSION_LASTCHANGE "Better web ui for config incl ui for sensor config"
+#define VERSION_NUMBER "20191230T1705"
+#define VERSION_LASTCHANGE "Allow config of dht22 sensor names from web ui"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -40,11 +40,13 @@
 
 // define struct to hold general config
 struct {
-  bool did_config = false;
+  uint8_t version = 1;
   char endpoint[64] = "";
   unsigned long delayPrint = 0L;
   unsigned long delayPoll = 0L;
   unsigned long delayPost = 0L;
+  char dht22_temp[20] = "";
+  char dht22_hum[20] = "";
 } configuration;
 
 // **** WiFi *****
@@ -93,6 +95,10 @@ uint8_t sensorCount = 0;
   float dht22_temp;
   float dht22_hum;
 #endif
+
+bool hasWebEndpoint() {
+  return strcmp(configuration.endpoint, "") != 0;
+}
 
 /**
  * Get Mac address to use.
@@ -216,7 +222,7 @@ void webHandle_GetSensorConfig() {
   sprintf(str_delay_post, "%lu", configuration.delayPost);
 
   // create buffer
-  char response[1024];
+  char response[2048];
 
   // show current response
   webHeader(response, true, "Sensor Config.");
@@ -231,6 +237,11 @@ void webHandle_GetSensorConfig() {
   } else {
     strcat(response, configuration.endpoint); 
   }
+  strcat(response, "<br/>");
+#ifdef SENSORTYPE_DHT22
+  strcat(response, "Sensor temp. name: "); strcat(response, strcmp(configuration.dht22_temp, "") == 0 ? "&lt;none set&gt;" : configuration.dht22_temp);  strcat(response, "<br/>");
+  strcat(response, "Sensor hum. name: "); strcat(response, strcmp(configuration.dht22_hum, "") == 0 ? "&lt;none set&gt;" : configuration.dht22_hum);  strcat(response, "<br/>");
+#endif
   strcat(response, "</p>");
 
   // add form
@@ -240,6 +251,10 @@ void webHandle_GetSensorConfig() {
   strcat(response, "<tr><td align=\"left\">Delay, poll</td><td><input type=\"text\" name=\"poll\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Delay, post</td><td><input type=\"text\" name=\"post\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Endpoint</td><td><input type=\"text\" name=\"endpoint\" autocomplete=\"off\"></input></td></tr>");
+#ifdef SENSORTYPE_DHT22
+  strcat(response, "<tr><td align=\"left\">Sensor temp. name</td><td><input type=\"text\" name=\"dht22_temp\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td align=\"left\">Sensor hum. name</td><td><input type=\"text\" name=\"dht22_hum\" autocomplete=\"off\"></input></td></tr>");
+#endif
   strcat(response, "<tr><td colspan=\"2\" align=\"right\"><input type=\"submit\"></input></td></tr>");
   strcat(response, "</table>");
 
@@ -276,6 +291,14 @@ void webHandle_PostSensorForm() {
     strcpy(configuration.endpoint, server.arg("endpoint").c_str());
     didUpdate = true;
   }
+  if (server.arg("dht22_temp").length() > 0) {
+    strcpy(configuration.dht22_temp, server.arg("dht22_temp").c_str());
+    didUpdate = true;
+  }
+  if (server.arg("dht22_hum").length() > 0) {
+    strcpy(configuration.dht22_hum, server.arg("dht22_hum").c_str());
+    didUpdate = true;
+  }
 
   if (didUpdate) {
     // save to eeprom
@@ -286,6 +309,7 @@ void webHandle_PostSensorForm() {
     char response[400];
     webRestarting(response);
     server.send(200, "text/html", response);
+    yield();
 
     // restart esp
     ESP.restart();
@@ -330,6 +354,7 @@ void webHandle_PostWifiForm() {
   char response[400];
   webRestarting(response);
   server.send(200, "text/html", response);
+  delay(200);
 
   // restart esp
   ESP.restart();
@@ -558,12 +583,14 @@ char* preparePayload() {
     dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_dht_temp);
     dtostrf(dht22_hum, 6, HUM_DECIMALS, str_dht_hum);
     */
-    JsonObject jsonSensorData = jsonData.createNestedObject();
-    jsonSensorData["sensorId"] = SENSORID_DHT22_TEMP;
-    jsonSensorData["sensorValue"].set(dht22_temp);
-    jsonSensorData = jsonData.createNestedObject();
-    jsonSensorData["sensorId"] = SENSORID_DHT22_HUM;
-    jsonSensorData["sensorValue"].set(dht22_hum);
+    if (strcmp(configuration.dht22_temp, "") != 0 && strcmp(configuration.dht22_hum, "") != 0) {
+      JsonObject jsonSensorData = jsonData.createNestedObject();
+      jsonSensorData["sensorId"].set(configuration.dht22_temp);
+      jsonSensorData["sensorValue"].set(dht22_temp);
+      jsonSensorData = jsonData.createNestedObject();
+      jsonSensorData["sensorId"].set(configuration.dht22_hum);
+      jsonSensorData["sensorValue"].set(dht22_hum);
+    }
   #endif
 
   #ifdef SENSORTYPE_LDR
@@ -706,12 +733,18 @@ void readData_DHT22() {
 }
 
 void printData_DHT22() {
-  Serial.print(SENSORID_DHT22_TEMP);
+  if (strcmp(configuration.dht22_temp, "") == 0 || strcmp(configuration.dht22_hum, "") == 0 ) {
+    Serial.println("Missing name for DHT22 temperatur and/or humidity sensor");
+    return;
+  }
+  Serial.print(configuration.dht22_temp);
   Serial.print(": ");
-  Serial.println(dht22_temp);
-  Serial.print(SENSORID_DHT22_HUM);
+  Serial.print(dht22_temp);
+  Serial.println(" (temperature)");
+  Serial.print(configuration.dht22_hum);
   Serial.print(": ");
-  Serial.println(dht22_hum);
+  Serial.print(dht22_hum);
+  Serial.println(" (humidity)");
 }
 #endif
 
@@ -753,23 +786,46 @@ void setup() {
   // init config
   EEPROM.begin(512);
   EEPROM.get(100, configuration);
-  if (!configuration.did_config || (configuration.delayPrint == 4294967295 && configuration.delayPoll == 4294967295 && configuration.delayPost == 4294967295)) {
+  
+  if (configuration.version != 1) {
     Serial.println("Setting standard configuration");
+    configuration.version = 1;
     strcpy(configuration.endpoint, "");
+    strcpy(configuration.dht22_temp, "");
+    strcpy(configuration.dht22_hum, "");
     configuration.delayPrint = DEFAULT_DELAY_PRINT;
     configuration.delayPoll = DEFAULT_DELAY_POLL;
     configuration.delayPost = DEFAULT_DELAY_POST;
     EEPROM.put(100, configuration);
     EEPROM.commit();
   }
-  Serial.print("Read data from EEPROM - endpoint: ");
-  Serial.println(configuration.endpoint);
-  Serial.print("Read data from EEPROM - delay print: ");
+  Serial.print("Read data from EEPROM - endpoint <");
+  Serial.print(configuration.endpoint);
+  Serial.println(">");
+  Serial.print("Read data from EEPROM - delay print <");
   Serial.print(configuration.delayPrint);
-  Serial.print(", delay poll: ");
+  Serial.print("> delay poll <");
   Serial.print(configuration.delayPoll);
-  Serial.print(", delay post: ");
-  Serial.println(configuration.delayPost);
+  Serial.print("> delay post <");
+  Serial.print(configuration.delayPost);
+  Serial.println(">");
+#ifdef SENSORTYPE_DHT22
+  Serial.print("Using DHT22 on pin <");
+  Serial.print(DHT_PIN);
+  Serial.print("> with temp. name <");
+  Serial.print(configuration.dht22_temp);
+  Serial.print("> and hum name <");
+  Serial.print(configuration.dht22_hum);
+  Serial.println(">");
+#endif
+#ifdef SENSORTYPE_DS18B20
+  Serial.print("Using DS18B20 on pins <");
+  for (uint8_t i=0; i<sizeof(DS18B20_PINS) / sizeof(uint8_t); i++) {
+    if (i > 0) Serial.print(", ");
+    Serial.print(DS18B20_PINS[i]);
+  }
+  Serial.println(">");
+#endif
 
   // init networking
   initNetworking();
@@ -833,11 +889,8 @@ void loop() {
     Serial.println("No network connected...");
     return;
   }
-
-  // abort if no endpoint
-  if (strcmp(configuration.endpoint, "") == 0) return;
   
-  if (justReset) {
+  if (justReset && hasWebEndpoint()) {
     // this is the first run - tell web server we restarted
     yield();
     justReset = false;
@@ -862,7 +915,6 @@ void loop() {
     sendData(jsonBuffer);
     yield();
   }
-  
 
   // reset reconnect count
   reconnect = 0;
@@ -931,7 +983,7 @@ void loop() {
   yield();
 
   // post
-  if (!startedPostData && strcmp(configuration.endpoint, "") != 0 && ((millis() - lastPostData) > configuration.delayPost)) {
+  if (!startedPostData && hasWebEndpoint() && ((millis() - lastPostData) > configuration.delayPost)) {
     lastPostData = millis();
     startedPostData = true;
     
