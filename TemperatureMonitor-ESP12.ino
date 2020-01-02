@@ -181,21 +181,22 @@ void webHandle_GetRoot() {
 }
 
 void webHandle_GetData() {
-  char str_dht_temp[8];
-  char str_dht_hum[8];
-  dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_dht_temp);
-  dtostrf(dht22_hum, 6, HUM_DECIMALS, str_dht_hum);
+  char str_temp[8];
+  char str_hum[8];
   
   char response[400];
   webHeader(response, true, "Data");
   strcat(response, "<div class=\"position menuitem\">");
+  
 #ifdef SENSORTYPE_DS18B20
   sensorCount = getDS18B20SensorCount();
   if (sensorCount > 0) {
     for (uint8_t i=0; i<sensorCount; i++) {
+      dtostrf(temperatures[i], 6, TEMP_DECIMALS, str_temp);
+      
       strcat(response, ds18b20AddressToString(addresses[i]));
       strcat(response, ": ");
-      strcat(response, temperatures[i]);
+      strcat(response, str_temp);
       strcat(response, "<br/>");
     }
   } else {
@@ -203,12 +204,16 @@ void webHandle_GetData() {
   }
 #endif
 #ifdef SENSORTYPE_DHT22
+  dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_temp);
+  dtostrf(dht22_hum, 6, HUM_DECIMALS, str_hum);
+  
   strcat(response, "Temperature: ");
-  strcat(response, str_dht_temp);
+  strcat(response, str_temp);
   strcat(response, "&deg;C<br/>Humidity: ");
-  strcat(response, str_dht_hum);
+  strcat(response, str_hum);
   strcat(response, "%");
 #endif
+
   strcat(response, "</div></body></html>");
   server.send(200, "text/html", response);
 }
@@ -711,6 +716,7 @@ void printData_DS18B20() {
   } else {
     Serial.println("No DS18B20 sensors found on bus");
   }
+}
 #endif
 
 // ******************** DHT22
