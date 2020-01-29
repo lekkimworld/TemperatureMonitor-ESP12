@@ -21,8 +21,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20191230T1705"
-#define VERSION_LASTCHANGE "Allow config of dht22 sensor names from web ui"
+#define VERSION_NUMBER "20200124T1500"
+#define VERSION_LASTCHANGE "Add authentication support"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -40,13 +40,14 @@
 
 // define struct to hold general config
 struct {
-  uint8_t version = 1;
+  uint8_t version = 2;
   char endpoint[64] = "";
+  char jwt[512] = "";
   unsigned long delayPrint = 0L;
   unsigned long delayPoll = 0L;
   unsigned long delayPost = 0L;
-  char dht22_temp[20] = "";
-  char dht22_hum[20] = "";
+  char sensorid_1[36] = ""; // temperature, dht22
+  char sensorid_2[36] = ""; // humidity, dht22
 } configuration;
 
 // **** WiFi *****
@@ -75,6 +76,8 @@ boolean startedPostData = false;
 boolean justReset = true;
 uint8_t reconnect;
 uint8_t sensorCount = 0;
+uint8_t lastHttpResponseCode;
+char lastHttpResponse[2048];
 
 // ds18b20
 #ifdef SENSORTYPE_DS18B20
@@ -92,12 +95,19 @@ uint8_t sensorCount = 0;
 #ifdef SENSORTYPE_DHT22
   DHT_Unified dht(DHT_PIN, DHT_TYPE);
   
-  float dht22_temp;
-  float dht22_hum;
+  float sensorid_1;
+  float sensorid_2;
 #endif
 
 bool hasWebEndpoint() {
   return strcmp(configuration.endpoint, "") != 0;
+}
+
+void buildNetworkName(char* buffer) {
+  char mac_addr[18];
+  getMacAddressStringNoColon(mac_addr);
+  strcpy(buffer, "SensorCentral-");
+  strcat(buffer, mac_addr);
 }
 
 /**
@@ -170,7 +180,7 @@ void initWebserver() {
 void webHandle_GetRoot() {
   char response[600];
   webHeader(response, false, "Menu");
-  strcat(response, "<div class=\"position menuitem height30\"><a href=\"./data.html\">Data</a></div><div class=\"position menuitem height30\"><a href=\"./sensorconfig.html\">Sensor Config.</a></div><div class=\"position menuitem height30\"><a href=\"./wificonfig.html\">Wi-Fi Config.</a></div>");
+  strcat(response, "<div class=\"position menuitem height30\"><a href=\"./data.html\">Data</a></div><div class=\"position menuitem height30\"><a href=\"./sensorconfig.html\">Device/Sensor Config.</a></div><div class=\"position menuitem height30\"><a href=\"./wificonfig.html\">Wi-Fi Config.</a></div>");
   strcat(response, "<div class=\"position footer right\">");
   strcat(response, VERSION_NUMBER);
   strcat(response, "<br/>");
@@ -204,8 +214,8 @@ void webHandle_GetData() {
   }
 #endif
 #ifdef SENSORTYPE_DHT22
-  dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_temp);
-  dtostrf(dht22_hum, 6, HUM_DECIMALS, str_hum);
+  dtostrf(sensorid_1, 6, TEMP_DECIMALS, str_temp);
+  dtostrf(sensorid_2, 6, HUM_DECIMALS, str_hum);
   
   strcat(response, "Temperature: ");
   strcat(response, str_temp);
@@ -219,6 +229,8 @@ void webHandle_GetData() {
 }
 
 void webHandle_GetSensorConfig() {
+  char str_deviceid[36];
+  getMacAddressString(str_deviceid);
   char str_delay_print[12];
   sprintf(str_delay_print, "%lu", configuration.delayPrint);
   char str_delay_poll[12];
@@ -230,9 +242,10 @@ void webHandle_GetSensorConfig() {
   char response[2048];
 
   // show current response
-  webHeader(response, true, "Sensor Config.");
+  webHeader(response, true, "Device/Sensor Config.");
   strcat(response, "<div class=\"position menuitem\">");
   strcat(response, "<p>");
+  strcat(response, "Device ID: "); strcat(response, str_deviceid); strcat(response, "<br/>");
   strcat(response, "Current delay print: "); strcat(response, str_delay_print); strcat(response, "ms<br/>");
   strcat(response, "Current delay poll: "); strcat(response, str_delay_poll); strcat(response, "ms<br/>");
   strcat(response, "Current delay post: "); strcat(response, str_delay_post);  strcat(response, "ms<br/>");
@@ -243,9 +256,16 @@ void webHandle_GetSensorConfig() {
     strcat(response, configuration.endpoint); 
   }
   strcat(response, "<br/>");
+  strcat(response, "Current JWT: "); 
+  if (strcmp(configuration.jwt, "") == 0) {
+    strcat(response, "&lt;none configured&gt;"); 
+  } else {
+    strncat(response, configuration.jwt, 15); 
+  }
+  strcat(response, "<br/>");
 #ifdef SENSORTYPE_DHT22
-  strcat(response, "Sensor temp. name: "); strcat(response, strcmp(configuration.dht22_temp, "") == 0 ? "&lt;none set&gt;" : configuration.dht22_temp);  strcat(response, "<br/>");
-  strcat(response, "Sensor hum. name: "); strcat(response, strcmp(configuration.dht22_hum, "") == 0 ? "&lt;none set&gt;" : configuration.dht22_hum);  strcat(response, "<br/>");
+  strcat(response, "Sensor temp. name: "); strcat(response, strcmp(configuration.sensorid_1, "") == 0 ? "&lt;none set&gt;" : configuration.sensorid_1);  strcat(response, "<br/>");
+  strcat(response, "Sensor hum. name: "); strcat(response, strcmp(configuration.sensorid_2, "") == 0 ? "&lt;none set&gt;" : configuration.sensorid_2);  strcat(response, "<br/>");
 #endif
   strcat(response, "</p>");
 
@@ -256,9 +276,10 @@ void webHandle_GetSensorConfig() {
   strcat(response, "<tr><td align=\"left\">Delay, poll</td><td><input type=\"text\" name=\"poll\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Delay, post</td><td><input type=\"text\" name=\"post\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Endpoint</td><td><input type=\"text\" name=\"endpoint\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td align=\"left\">JWT</td><td><input type=\"text\" name=\"jwt\" autocomplete=\"off\"></input></td></tr>");
 #ifdef SENSORTYPE_DHT22
-  strcat(response, "<tr><td align=\"left\">Sensor temp. name</td><td><input type=\"text\" name=\"dht22_temp\" autocomplete=\"off\"></input></td></tr>");
-  strcat(response, "<tr><td align=\"left\">Sensor hum. name</td><td><input type=\"text\" name=\"dht22_hum\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td align=\"left\">Sensor ID 1 (temp)</td><td><input type=\"text\" name=\"sensorid_1\" autocomplete=\"off\"></input></td></tr>");
+  strcat(response, "<tr><td align=\"left\">Sensor ID 2 (hum)</td><td><input type=\"text\" name=\"sensorid_2\" autocomplete=\"off\"></input></td></tr>");
 #endif
   strcat(response, "<tr><td colspan=\"2\" align=\"right\"><input type=\"submit\"></input></td></tr>");
   strcat(response, "</table>");
@@ -296,18 +317,22 @@ void webHandle_PostSensorForm() {
     strcpy(configuration.endpoint, server.arg("endpoint").c_str());
     didUpdate = true;
   }
-  if (server.arg("dht22_temp").length() > 0) {
-    strcpy(configuration.dht22_temp, server.arg("dht22_temp").c_str());
+  if (server.arg("jwt").length() > 0) {
+    strcpy(configuration.jwt, server.arg("jwt").c_str());
     didUpdate = true;
   }
-  if (server.arg("dht22_hum").length() > 0) {
-    strcpy(configuration.dht22_hum, server.arg("dht22_hum").c_str());
+  if (server.arg("sensorid_1").length() > 0) {
+    strcpy(configuration.sensorid_1, server.arg("sensorid_1").c_str());
+    didUpdate = true;
+  }
+  if (server.arg("sensorid_2").length() > 0) {
+    strcpy(configuration.sensorid_2, server.arg("sensorid_2").c_str());
     didUpdate = true;
   }
 
   if (didUpdate) {
     // save to eeprom
-    EEPROM.put(100, configuration);
+    EEPROM.put(0, configuration);
     EEPROM.commit();
 
     // send response
@@ -352,7 +377,7 @@ void webHandle_PostWifiForm() {
   server.arg("ssid").toCharArray(wifi_data.ssid, 20);
   server.arg("password").toCharArray(wifi_data.password, 20);
   wifi_data.keep_ap_on = (server.arg("keep_ap_on") && server.arg("keep_ap_on").charAt(0) == '1');
-  EEPROM.put(0, wifi_data);
+  EEPROM.put(sizeof configuration, wifi_data);
   EEPROM.commit();
 
   // send response
@@ -386,11 +411,12 @@ void webHandle_NotFound(){
 void initNetworking() {
 #ifdef NETWORK_WIFI
   // read wifi config from eeprom
-  EEPROM.get(0, wifi_data);
+  EEPROM.get(sizeof configuration, wifi_data);
   Serial.println("Read data from EEPROM - ssid: " + String(wifi_data.ssid) + ", password: ****");
   
   // start AP
   char ssid[32];
+  buildNetworkName(ssid);
   char mac_addr[18];
   getMacAddressStringNoColon(mac_addr);
   strcpy(ssid, "SensorCentral-");
@@ -459,17 +485,28 @@ void sendData(char* data) {
 #ifdef NETWORK_WIFI
   // send
   HTTPClient http;
-  char server[50];
+  char server[70];
   strcpy(server, "http://");
   strcat(server, configuration.endpoint);
   http.begin(server);
   http.addHeader("Content-Type", "application/json");
+  if (strcmp(configuration.jwt, "") != 0) {
+    char auth_header[600];
+    strcpy(auth_header, "Bearer ");
+    strcat(auth_header, configuration.jwt);
+    http.addHeader("Authorization", auth_header);
+  }
   http.addHeader("Content-Length", str_contentLength);
   http.addHeader("X-SensorCentral-Version", VERSION_NUMBER);
   http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
-  int httpCode = http.POST(data);
-  String payload = http.getString();                  //Get the response payload
-  
+
+  // post data and show respponse
+  lastHttpResponseCode = http.POST(data);
+  http.getString().toCharArray(lastHttpResponse, 2048, 0);
+  Serial.print("Received response code: "); Serial.println(lastHttpResponseCode);
+  Serial.print("Received payload: "); Serial.println(lastHttpResponse);
+
+  // end http
   http.end();
 #endif
 
@@ -480,6 +517,9 @@ void sendData(char* data) {
     client.println("POST / HTTP/1.0");
     client.print  ("Host: "); client.println(server);
     client.println("Content-Type: application/json");
+    if (strcmp(configuration.jwt, "") != 0) {
+      client.print("Authorization: Bearer "); client.println(configuration.jwt);
+    }
     client.print  ("Content-Length: "); client.println(str_contentLength);
     client.print  ("X-SensorCentral-Version: "); client.println(VERSION_NUMBER);
     client.print  ("X-SensorCentral-LastChange: "); client.println(VERSION_LASTCHANGE);
@@ -558,7 +598,7 @@ void printData() {
 
 char* preparePayload() {
   // create document
-  StaticJsonDocument<1024> doc;
+  StaticJsonDocument<2048> doc;
   
   // get your MAC address
   char mac_addr[20];
@@ -573,7 +613,6 @@ char* preparePayload() {
   #ifdef SENSORTYPE_DS18B20
   //char str_temp[8];
   for (uint8_t i=0, k=getDS18B20SensorCount(); i<k; i++) {
-    //dtostrf(temperatures[i], 6, TEMP_DECIMALS, str_temp);
     JsonObject jsonSensorData = jsonData.createNestedObject();
     jsonSensorData["sensorId"] = ds18b20AddressToString(addresses[i]);
     jsonSensorData["sensorValue"].set(temperatures[i]);
@@ -582,26 +621,18 @@ char* preparePayload() {
 
   #ifdef SENSORTYPE_DHT22
     // add dht22
-    /*
-    char str_dht_temp[8];
-    char str_dht_hum[8];
-    dtostrf(dht22_temp, 6, TEMP_DECIMALS, str_dht_temp);
-    dtostrf(dht22_hum, 6, HUM_DECIMALS, str_dht_hum);
-    */
-    if (strcmp(configuration.dht22_temp, "") != 0 && strcmp(configuration.dht22_hum, "") != 0) {
+    if (strcmp(configuration.sensorid_1, "") != 0 && strcmp(configuration.sensorid_2, "") != 0) {
       JsonObject jsonSensorData = jsonData.createNestedObject();
-      jsonSensorData["sensorId"].set(configuration.dht22_temp);
-      jsonSensorData["sensorValue"].set(dht22_temp);
+      jsonSensorData["sensorId"].set(configuration.sensorid_1);
+      jsonSensorData["sensorValue"].set(sensorid_1);
       jsonSensorData = jsonData.createNestedObject();
-      jsonSensorData["sensorId"].set(configuration.dht22_hum);
-      jsonSensorData["sensorValue"].set(dht22_hum);
+      jsonSensorData["sensorId"].set(configuration.sensorid_2);
+      jsonSensorData["sensorValue"].set(sensorid_2);
     }
   #endif
 
   #ifdef SENSORTYPE_LDR
     // add ldr
-    //char str_ldr[8];
-    //ltoa(ldr, str_ldr, 10);
     JsonObject jsonSensorData = jsonData.createNestedObject();
     jsonSensorData["sensorId"] = SENSORID_LDR
     jsonSensorData["sensorValue"].set(ldr);
@@ -610,7 +641,7 @@ char* preparePayload() {
 
   // serialize
   uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
-  char jsonBuffer[jsonLength];
+  char jsonBuffer[2048];
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
   return jsonBuffer;
 }
@@ -731,25 +762,25 @@ void readData_DHT22() {
   sensorCount = 1;
   sensors_event_t event_temp;
   dht.temperature().getEvent(&event_temp);
-  dht22_temp = event_temp.temperature;
+  sensorid_1 = event_temp.temperature;
 
   sensors_event_t event_hum;
   dht.humidity().getEvent(&event_hum);
-  dht22_hum = event_hum.relative_humidity;
+  sensorid_2 = event_hum.relative_humidity;
 }
 
 void printData_DHT22() {
-  if (strcmp(configuration.dht22_temp, "") == 0 || strcmp(configuration.dht22_hum, "") == 0 ) {
+  if (strcmp(configuration.sensorid_1, "") == 0 || strcmp(configuration.sensorid_2, "") == 0 ) {
     Serial.println("Missing name for DHT22 temperatur and/or humidity sensor");
     return;
   }
-  Serial.print(configuration.dht22_temp);
+  Serial.print(configuration.sensorid_1);
   Serial.print(": ");
-  Serial.print(dht22_temp);
+  Serial.print(sensorid_1);
   Serial.println(" (temperature)");
-  Serial.print(configuration.dht22_hum);
+  Serial.print(configuration.sensorid_2);
   Serial.print(": ");
-  Serial.print(dht22_hum);
+  Serial.print(sensorid_2);
   Serial.println(" (humidity)");
 }
 #endif
@@ -790,23 +821,27 @@ void setup() {
   printMacAddress();
 
   // init config
-  EEPROM.begin(512);
-  EEPROM.get(100, configuration);
+  EEPROM.begin(sizeof configuration + sizeof wifi_data + 10);
+  EEPROM.get(0, configuration);
   
-  if (configuration.version != 1) {
+  if (configuration.version != 2) {
     Serial.println("Setting standard configuration");
-    configuration.version = 1;
+    configuration.version = 2;
     strcpy(configuration.endpoint, "");
-    strcpy(configuration.dht22_temp, "");
-    strcpy(configuration.dht22_hum, "");
+    strcpy(configuration.jwt, "");
+    strcpy(configuration.sensorid_1, "");
+    strcpy(configuration.sensorid_2, "");
     configuration.delayPrint = DEFAULT_DELAY_PRINT;
     configuration.delayPoll = DEFAULT_DELAY_POLL;
     configuration.delayPost = DEFAULT_DELAY_POST;
-    EEPROM.put(100, configuration);
+    EEPROM.put(0, configuration);
     EEPROM.commit();
   }
   Serial.print("Read data from EEPROM - endpoint <");
   Serial.print(configuration.endpoint);
+  Serial.println(">");
+  Serial.print("Read data from EEPROM - JWT <");
+  Serial.print(configuration.jwt);
   Serial.println(">");
   Serial.print("Read data from EEPROM - delay print <");
   Serial.print(configuration.delayPrint);
@@ -819,9 +854,9 @@ void setup() {
   Serial.print("Using DHT22 on pin <");
   Serial.print(DHT_PIN);
   Serial.print("> with temp. name <");
-  Serial.print(configuration.dht22_temp);
+  Serial.print(configuration.sensorid_1);
   Serial.print("> and hum name <");
-  Serial.print(configuration.dht22_hum);
+  Serial.print(configuration.sensorid_2);
   Serial.println(">");
 #endif
 #ifdef SENSORTYPE_DS18B20
@@ -832,7 +867,7 @@ void setup() {
   }
   Serial.println(">");
 #endif
-
+  
   // init networking
   initNetworking();
 
@@ -908,10 +943,10 @@ void loop() {
     // build payload
     StaticJsonDocument<256> doc;
     doc["msgtype"] = "control";
+    doc["deviceId"].set(mac_addr);
     JsonObject jsonData = doc.createNestedObject("data"); 
     jsonData["restart"] = true;
-    jsonData["deviceId"].set(mac_addr);
-
+    
     // serialize
     uint8_t jsonLength = measureJson(doc) + 1; 
     char jsonBuffer[jsonLength];
