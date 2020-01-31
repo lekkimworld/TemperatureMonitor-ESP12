@@ -1,16 +1,11 @@
 #include "vars.h"
-#include "network_config.h"
 #include <ArduinoJson.h>
 #include <EEPROM.h>
-#ifdef SENSORTYPE_DS18B20
-  #include <Adafruit_Sensor.h>
-  #include <OneWire.h> 
-  #include <DallasTemperature.h>
-#endif
-#ifdef SENSORTYPE_DHT22
-  #include <DHT.h>
-  #include <DHT_U.h>
-#endif
+#include <Adafruit_Sensor.h>
+#include <OneWire.h> 
+#include <DallasTemperature.h>
+#include <DHT.h>
+#include <DHT_U.h>
 #ifdef NETWORK_ETHERNET
   #include <SPI.h>
   #include <Ethernet.h>
@@ -21,12 +16,14 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20200124T1500"
-#define VERSION_LASTCHANGE "Add authentication support"
+#define VERSION_NUMBER "20200131T1100"
+#define VERSION_LASTCHANGE "One codebase for dht22 and ds18b20 sensors v2"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
 //#define PIN_HTTP_LED 16
+#define DS18B20_TEMP_PRECISION 12        // 12 bits precision
+#define DHT_TYPE DHT22
 #define DELAY_CONNECT_ATTEMPT 10000L    // delay between attempting wifi reconnect or if no ethernet link, in milliseconds
 #define DELAY_TURNOFF_AP 300000L        // delay after restart before turning off access point, in milliseconds
 #define DELAY_BLINK 200L                // how long a led blinks, in milliseconds
@@ -34,23 +31,23 @@
 #define DEFAULT_DELAY_PRINT 10000L      // 
 #define DEFAULT_DELAY_POLL 10000L       // 
 #define DEFAULT_DELAY_POST 120000L      // 
-#define MAX_DS18B20_SENSORS 10          // maximum of DS18B20 sensors we can connect
+#define MAX_SENSORS 10                  // maximum number of sensors we can connect
 #define TEMP_DECIMALS 4                 // 4 decimals of output
 #define HUM_DECIMALS 4                  // 4 decimals of output
 
 // define struct to hold general config
+#define CONFIGURATION_VERSION 3
 struct {
-  uint8_t version = 2;
+  uint8_t version = CONFIGURATION_VERSION;
   char endpoint[64] = "";
   char jwt[512] = "";
+  char sensorType[36] = "";
   unsigned long delayPrint = 0L;
   unsigned long delayPoll = 0L;
   unsigned long delayPost = 0L;
-  char sensorid_1[36] = ""; // temperature, dht22
-  char sensorid_2[36] = ""; // humidity, dht22
 } configuration;
 
-// **** WiFi *****
+// **** network *****
 #ifdef NETWORK_WIFI
   ESP8266WebServer server(80);
 
@@ -75,29 +72,23 @@ boolean startedPrint = false;
 boolean startedPostData = false;
 boolean justReset = true;
 uint8_t reconnect;
-uint8_t sensorCount = 0;
-uint8_t lastHttpResponseCode;
-char lastHttpResponse[2048];
+int lastHttpResponseCode = 0;
+char lastHttpResponse[2048] = ""; 
 
-// ds18b20
-#ifdef SENSORTYPE_DS18B20
-  uint8_t sensorCounts[sizeof(DS18B20_PINS)/sizeof(uint8_t)];
-  DeviceAddress addresses[MAX_DS18B20_SENSORS];
-  float temperatures[MAX_DS18B20_SENSORS];
-#endif
+// sensor data
+uint8_t sensorPins[] = {14};
+uint8_t sensorsPerPin[sizeof(sensorPins)/sizeof(uint8_t)]; // array with number of sensors per pin
+float sensorSamples[MAX_SENSORS]; // the samples coming of the actual sensors
+DeviceAddress sensorAddresses[MAX_SENSORS]; // if using DS18B20 we need the address of each sensor
+char sensorIds[MAX_SENSORS][36];
 
-// ldr
-#ifdef SENSORTYPE_LDR
-  unsigned long ldr = 0;
-#endif
+bool isSensorTypeDS18B20() {
+  return strcmp(configuration.sensorType, "DS18B20") == 0;
+}
+bool isSensorTypeDHT22() {
+  return strcmp(configuration.sensorType, "DHT22") == 0;
+}
 
-// dht22
-#ifdef SENSORTYPE_DHT22
-  DHT_Unified dht(DHT_PIN, DHT_TYPE);
-  
-  float sensorid_1;
-  float sensorid_2;
-#endif
 
 bool hasWebEndpoint() {
   return strcmp(configuration.endpoint, "") != 0;
@@ -151,6 +142,47 @@ void printMacAddress() {
   Serial.println(buf);
 }
 
+/**
+ * Convert IP address to a char buffer.
+ */
+IPAddress* getIpAddress() {
+  IPAddress ip;
+  #ifdef NETWORK_WIFI
+    ip = WiFi.localIP();
+  #endif
+  #ifdef NETWORK_ETHERNET
+    ip = Ethernet.localIP();
+  #endif
+  return &ip;
+}
+
+/**
+ * Convert IP address to a char buffer.
+ */
+void getIpAddressString(char *buffer) {
+  IPAddress ip;
+  #ifdef NETWORK_WIFI
+    ip = WiFi.localIP();
+  #endif
+  #ifdef NETWORK_ETHERNET
+    ip = Ethernet.localIP();
+  #endif
+  strcpy(buffer, ip.toString().c_str());
+}
+
+/**
+ * Print IP address to serial console
+ */
+void printIpAddress() {
+  #ifdef NETWORK_WIFI
+    Serial.println(WiFi.localIP());
+  #endif
+  #ifdef NETWORK_ETHERNET
+    Serial.println(Ethernet.localIP());
+  #endif
+}
+
+
 // *** WEB SERVER
 void webHeader(char* buffer, bool back, char* title) {
   strcpy(buffer, "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"initial-scale=1.0\"><title>SensorCentral</title><link rel=\"stylesheet\" href=\"./styles.css\"></head><body>");
@@ -172,15 +204,16 @@ void initWebserver() {
   server.on("/sensor", HTTP_POST, webHandle_PostSensorForm);
   server.on("/wificonfig.html", HTTP_GET, webHandle_GetWifiConfig);
   server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
+  server.on("/httpstatus.html", HTTP_GET, webHandle_GetHttpStatus);
   server.on("/styles.css", HTTP_GET, webHandle_GetStyles);
   server.onNotFound(webHandle_NotFound);  
   
 }
 
 void webHandle_GetRoot() {
-  char response[600];
+  char response[1024];
   webHeader(response, false, "Menu");
-  strcat(response, "<div class=\"position menuitem height30\"><a href=\"./data.html\">Data</a></div><div class=\"position menuitem height30\"><a href=\"./sensorconfig.html\">Device/Sensor Config.</a></div><div class=\"position menuitem height30\"><a href=\"./wificonfig.html\">Wi-Fi Config.</a></div>");
+  strcat(response, "<div class=\"position menuitem height30\"><a href=\"./data.html\">Data</a></div><div class=\"position menuitem height30\"><a href=\"./sensorconfig.html\">Device/Sensor Config.</a></div><div class=\"position menuitem height30\"><a href=\"./wificonfig.html\">Wi-Fi Config.</a></div><div class=\"position menuitem height30\"><a href=\"./httpstatus.html\">HTTP status</a></div>");
   strcat(response, "<div class=\"position footer right\">");
   strcat(response, VERSION_NUMBER);
   strcat(response, "<br/>");
@@ -190,6 +223,22 @@ void webHandle_GetRoot() {
   server.send(200, "text/html", response);
 }
 
+void webHandle_GetHttpStatus() {
+  char str_httpcode[8];
+  sprintf(str_httpcode, "%d", lastHttpResponseCode);
+  
+  char response[600];
+  webHeader(response, true, "HTTP Status");
+  strcat(response, "<div class=\"position menuitem\">");
+  strcat(response, "HTTP Code: "); strcat(response, str_httpcode); strcat(response, "<br/>");
+  strcat(response, "HTTP Response: <br/>"); strcat(response, lastHttpResponse); strcat(response, "<br/>");
+  strcat(response, "</div>");
+  strcat(response, "</body></html>");
+  server.send(200, "text/html", response);
+}
+
+
+
 void webHandle_GetData() {
   char str_temp[8];
   char str_hum[8];
@@ -197,32 +246,31 @@ void webHandle_GetData() {
   char response[400];
   webHeader(response, true, "Data");
   strcat(response, "<div class=\"position menuitem\">");
-  
-#ifdef SENSORTYPE_DS18B20
-  sensorCount = getDS18B20SensorCount();
-  if (sensorCount > 0) {
-    for (uint8_t i=0; i<sensorCount; i++) {
-      dtostrf(temperatures[i], 6, TEMP_DECIMALS, str_temp);
-      
-      strcat(response, ds18b20AddressToString(addresses[i]));
-      strcat(response, ": ");
-      strcat(response, str_temp);
-      strcat(response, "<br/>");
+
+  if (isSensorTypeDS18B20()) {
+    uint8_t sensorCount = getSensorCount();
+    if (sensorCount > 0) {
+      for (uint8_t i=0; i<sensorCount; i++) {
+        dtostrf(sensorSamples[i], 6, TEMP_DECIMALS, str_temp);
+        
+        strcat(response, sensorIds[i]);
+        strcat(response, ": ");
+        strcat(response, str_temp);
+        strcat(response, "<br/>");
+      }
+    } else {
+      strcat(response, "No DS18B20 sensors found on bus");
     }
-  } else {
-    strcat(response, "No DS18B20 sensors found on bus");
+  } else if (isSensorTypeDHT22()) {
+    dtostrf(sensorSamples[0], 6, TEMP_DECIMALS, str_temp);
+    dtostrf(sensorSamples[1], 6, HUM_DECIMALS, str_hum);
+    
+    strcat(response, "Temperature: ");
+    strcat(response, str_temp);
+    strcat(response, "&deg;C<br/>Humidity: ");
+    strcat(response, str_hum);
+    strcat(response, "%");
   }
-#endif
-#ifdef SENSORTYPE_DHT22
-  dtostrf(sensorid_1, 6, TEMP_DECIMALS, str_temp);
-  dtostrf(sensorid_2, 6, HUM_DECIMALS, str_hum);
-  
-  strcat(response, "Temperature: ");
-  strcat(response, str_temp);
-  strcat(response, "&deg;C<br/>Humidity: ");
-  strcat(response, str_hum);
-  strcat(response, "%");
-#endif
 
   strcat(response, "</div></body></html>");
   server.send(200, "text/html", response);
@@ -261,12 +309,10 @@ void webHandle_GetSensorConfig() {
     strcat(response, "&lt;none configured&gt;"); 
   } else {
     strncat(response, configuration.jwt, 15); 
+    strcat(response, "..."); 
   }
   strcat(response, "<br/>");
-#ifdef SENSORTYPE_DHT22
-  strcat(response, "Sensor temp. name: "); strcat(response, strcmp(configuration.sensorid_1, "") == 0 ? "&lt;none set&gt;" : configuration.sensorid_1);  strcat(response, "<br/>");
-  strcat(response, "Sensor hum. name: "); strcat(response, strcmp(configuration.sensorid_2, "") == 0 ? "&lt;none set&gt;" : configuration.sensorid_2);  strcat(response, "<br/>");
-#endif
+  strcat(response, "Current sensor type: "); strcat(response, configuration.sensorType);  strcat(response, "<br/>");
   strcat(response, "</p>");
 
   // add form
@@ -277,10 +323,7 @@ void webHandle_GetSensorConfig() {
   strcat(response, "<tr><td align=\"left\">Delay, post</td><td><input type=\"text\" name=\"post\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Endpoint</td><td><input type=\"text\" name=\"endpoint\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">JWT</td><td><input type=\"text\" name=\"jwt\" autocomplete=\"off\"></input></td></tr>");
-#ifdef SENSORTYPE_DHT22
-  strcat(response, "<tr><td align=\"left\">Sensor ID 1 (temp)</td><td><input type=\"text\" name=\"sensorid_1\" autocomplete=\"off\"></input></td></tr>");
-  strcat(response, "<tr><td align=\"left\">Sensor ID 2 (hum)</td><td><input type=\"text\" name=\"sensorid_2\" autocomplete=\"off\"></input></td></tr>");
-#endif
+  strcat(response, "<tr><td align=\"left\">Sensor type</td><td><select name=\"sensortype\"><option>DS18B20</option><option>DHT22</option></select></td></tr>");
   strcat(response, "<tr><td colspan=\"2\" align=\"right\"><input type=\"submit\"></input></td></tr>");
   strcat(response, "</table>");
 
@@ -321,12 +364,8 @@ void webHandle_PostSensorForm() {
     strcpy(configuration.jwt, server.arg("jwt").c_str());
     didUpdate = true;
   }
-  if (server.arg("sensorid_1").length() > 0) {
-    strcpy(configuration.sensorid_1, server.arg("sensorid_1").c_str());
-    didUpdate = true;
-  }
-  if (server.arg("sensorid_2").length() > 0) {
-    strcpy(configuration.sensorid_2, server.arg("sensorid_2").c_str());
+  if (server.arg("sensortype").length() > 0) {
+    strcpy(configuration.sensorType, server.arg("sensortype").c_str());
     didUpdate = true;
   }
 
@@ -440,7 +479,6 @@ void initNetworking() {
   }
   Serial.print("\n");
   Serial.print("WiFi connection established - IP address: ");
-  Serial.println(WiFi.localIP());
 
 #endif
 #ifdef NETWORK_ETHERNET
@@ -471,9 +509,11 @@ void initNetworking() {
   // ensure continued DHCP lease
   if (Ethernet.maintain() != 0) {
     Serial.print("Received new DHCP address: ");
-    Serial.println(Ethernet.localIP());
   }
 #endif
+  char ip[16];
+  getIpAddressString(ip);
+  Serial.println(ip);
 }
 
 void sendData(char* data) {
@@ -581,17 +621,11 @@ void debugWebServer(char* buffer) {
 void printData() {
   Serial.println("------------------------");
   
-  #ifdef SENSORTYPE_DS18B20
+  if (isSensorTypeDS18B20()) {
     printData_DS18B20();
-  #endif
-
-  #ifdef SENSORTYPE_DHT22
-      printData_DHT22();
-  #endif
-
-  #ifdef SENSORTYPE_LDR
-     printData_LDR();
-  #endif
+  } else if (isSensorTypeDHT22()) {
+    printData_DHT22();
+  }
     
   Serial.println("Printed available data");
 }
@@ -608,36 +642,13 @@ char* preparePayload() {
   doc["msgtype"] = "data";
   doc["deviceId"].set(mac_addr);
   JsonArray jsonData = doc.createNestedArray("data");
-  
-  // loop DS18B20 sensors
-  #ifdef SENSORTYPE_DS18B20
-  //char str_temp[8];
-  for (uint8_t i=0, k=getDS18B20SensorCount(); i<k; i++) {
-    JsonObject jsonSensorData = jsonData.createNestedObject();
-    jsonSensorData["sensorId"] = ds18b20AddressToString(addresses[i]);
-    jsonSensorData["sensorValue"].set(temperatures[i]);
-  }
-  #endif
 
-  #ifdef SENSORTYPE_DHT22
-    // add dht22
-    if (strcmp(configuration.sensorid_1, "") != 0 && strcmp(configuration.sensorid_2, "") != 0) {
-      JsonObject jsonSensorData = jsonData.createNestedObject();
-      jsonSensorData["sensorId"].set(configuration.sensorid_1);
-      jsonSensorData["sensorValue"].set(sensorid_1);
-      jsonSensorData = jsonData.createNestedObject();
-      jsonSensorData["sensorId"].set(configuration.sensorid_2);
-      jsonSensorData["sensorValue"].set(sensorid_2);
-    }
-  #endif
-
-  #ifdef SENSORTYPE_LDR
-    // add ldr
+  // loop sensors and add data
+  for (uint8_t i=0, k=getSensorCount(); i<k; i++) {
     JsonObject jsonSensorData = jsonData.createNestedObject();
-    jsonSensorData["sensorId"] = SENSORID_LDR
-    jsonSensorData["sensorValue"].set(ldr);
+    jsonSensorData["sensorId"] = sensorIds[i];
+    jsonSensorData["sensorValue"].set(sensorSamples[i]);
   }
-  #endif
 
   // serialize
   uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
@@ -646,39 +657,39 @@ char* preparePayload() {
   return jsonBuffer;
 }
 
-// ******************** DS18B20
-#ifdef SENSORTYPE_DS18B20
-void initSensor_DS18B20() {
-  // Start up the sensors
-  Serial.println("Initializing DS18B20 sensors");
-  uint8_t sensorCountTotal = 0;
-  
-  for (uint8_t i=0; i<sizeof(DS18B20_PINS)/sizeof(uint8_t); i++) {
-    OneWire oneWire(DS18B20_PINS[i]);
-    DallasTemperature sensors(&oneWire);
-    sensors.begin();
-    Serial.print("Locating DS18B20 sensors on pin <");
-    Serial.print(DS18B20_PINS[i]);
-    Serial.print(">. Found ");
-    Serial.print(sensors.getDeviceCount(), DEC);
-    Serial.println(" DS18B20 sensors.");
-    sensorCountTotal += sensors.getDeviceCount();
-  }
-  Serial.print("Found <");
-  Serial.print(sensorCountTotal);
-  Serial.println("> DS18B20 sensors");
-}
 
-/**
- * Get total DS18B20 sensor count across pins.
- */
-uint8_t getDS18B20SensorCount() {
+uint8_t getSensorCount() {
   uint8_t result = 0;
-  for (uint8_t i=0; i<sizeof(DS18B20_PINS)/sizeof(uint8_t); i++) {
-    result += sensorCounts[i];
+  for (uint8_t i=0; i<sizeof(sensorsPerPin)/sizeof(uint8_t); i++) {
+    result += sensorsPerPin[i];
   }
   return result;
 }
+
+// ******************** DS18B20
+void initSensor_DS18B20() {
+  // Start up the sensors
+  Serial.println("Initializing DS18B20 sensors");
+  uint8_t count = 0;
+  
+  for (uint8_t i=0; i<sizeof(sensorPins)/sizeof(uint8_t); i++) {
+    OneWire oneWire(sensorPins[i]);
+    DallasTemperature sensors(&oneWire);
+    sensors.begin();
+    Serial.print("Locating DS18B20 sensors on pin <");
+    Serial.print(sensorPins[i]);
+    Serial.print(">. Found ");
+    Serial.print(sensors.getDeviceCount(), DEC);
+    Serial.println(" DS18B20 sensors.");
+    sensorsPerPin[i] = sensors.getDeviceCount();
+    count += sensorsPerPin[i];
+  }
+  Serial.print("Found <");
+  Serial.print(count);
+  Serial.println("> DS18B20 sensors");
+}
+
+
 
 char* ds18b20AddressToString(DeviceAddress deviceAddress) {
     static char return_me[18];
@@ -696,40 +707,41 @@ char* ds18b20AddressToString(DeviceAddress deviceAddress) {
 
 void readData_DS18B20() {
   uint8_t indexTempAddress = 0;
-  for (uint8_t i=0; i<sizeof(DS18B20_PINS)/sizeof(uint8_t); i++) {
-    OneWire oneWire(DS18B20_PINS[i]);
+
+  // process each pin in turn
+  for (uint8_t i=0; i<sizeof(sensorPins)/sizeof(uint8_t); i++) {
+    OneWire oneWire(sensorPins[i]);
     DallasTemperature sensors(&oneWire);
     
     // begin to scan for change in sensors
     sensors.begin();
-  
+    sensors.setResolution(DS18B20_TEMP_PRECISION);
+    
     // get count
-    uint8_t sensorCount = sensorCounts[i];
+    uint8_t sensorCount = sensorsPerPin[i];
     uint8_t sensorCountNew = sensors.getDeviceCount();
     if (sensorCount != sensorCountNew) {
       // sensorCount changed
       Serial.print("Detected DS18B20 sensor count change on pin <");
-      Serial.print(DS18B20_PINS[i]);
+      Serial.print(sensorPins[i]);
       Serial.print("> - was ");
       Serial.print(sensorCount);
       Serial.print(" now ");
       Serial.println(sensorCountNew);
       sensorCount = sensorCountNew;
-      sensorCounts[i] = sensorCountNew;
+      sensorsPerPin[i] = sensorCountNew;
     }
 
-    // read temperaturs
+    // read temperatures
     if (sensorCount > 0) {
-      // set resolution
-      sensors.setResolution(DS18B20_TEMP_PRECISION);
-      
       // request temperatures and store
       sensors.requestTemperatures();
-    
+      
       // get addresses
-      for (uint8_t j=0; j<sensorCount; j++) {
-        sensors.getAddress(addresses[indexTempAddress], j);
-        temperatures[indexTempAddress] = sensors.getTempCByIndex(j);
+      for (uint8_t j=0; j<sensorsPerPin[i]; j++) {
+        sensors.getAddress(sensorAddresses[indexTempAddress], j);
+        strcpy(sensorIds[indexTempAddress], ds18b20AddressToString(sensorAddresses[indexTempAddress]));
+        sensorSamples[indexTempAddress] = sensors.getTempCByIndex(j);
         indexTempAddress++;
       }
     }
@@ -737,74 +749,59 @@ void readData_DS18B20() {
 }
 
 void printData_DS18B20() {
-  sensorCount = getDS18B20SensorCount();
+  uint8_t sensorCount = getSensorCount();
   if (sensorCount > 0) {
     for (uint8_t i=0; i<sensorCount; i++) {
-      Serial.print(ds18b20AddressToString(addresses[i]));
+      Serial.print(sensorIds[i]);
       Serial.print(": ");
-      Serial.println(temperatures[i], TEMP_DECIMALS);
+      Serial.println(sensorSamples[i], TEMP_DECIMALS);
     }
   } else {
     Serial.println("No DS18B20 sensors found on bus");
   }
 }
-#endif
+
 
 // ******************** DHT22
-#ifdef SENSORTYPE_DHT22
 void initSensor_DHT22() {
   // Start up the sensors
+  sensorsPerPin[0] = 2;
+  getMacAddressStringNoColon(sensorIds[0]);
+  strcat(sensorIds[0], "_temp");
+  getMacAddressStringNoColon(sensorIds[1]);
+  strcat(sensorIds[1], "_hum");
   Serial.println("Initializing DHT22 sensor");
-  dht.begin();
+  Serial.print("Temperature ID <");
+  Serial.print(sensorIds[0]);
+  Serial.println(">");
+  Serial.print("Humidity ID <");
+  Serial.print(sensorIds[1]);
+  Serial.println(">");
 }
 
 void readData_DHT22() {
-  sensorCount = 1;
-  sensors_event_t event_temp;
-  dht.temperature().getEvent(&event_temp);
-  sensorid_1 = event_temp.temperature;
+  // init
+  DHT dht(sensorPins[0], DHT_TYPE);
+  dht.begin();
 
-  sensors_event_t event_hum;
-  dht.humidity().getEvent(&event_hum);
-  sensorid_2 = event_hum.relative_humidity;
+  // read temperature
+  sensorSamples[0] = dht.readTemperature();
+
+  // read humidity
+  sensorSamples[1] = dht.readHumidity();
 }
 
 void printData_DHT22() {
-  if (strcmp(configuration.sensorid_1, "") == 0 || strcmp(configuration.sensorid_2, "") == 0 ) {
-    Serial.println("Missing name for DHT22 temperatur and/or humidity sensor");
-    return;
-  }
-  Serial.print(configuration.sensorid_1);
+  Serial.println("Printing data from DHT22 sensor");
+  Serial.print(sensorIds[0]);
   Serial.print(": ");
-  Serial.print(sensorid_1);
+  Serial.print(sensorSamples[0]);
   Serial.println(" (temperature)");
-  Serial.print(configuration.sensorid_2);
+  Serial.print(sensorIds[1]);
   Serial.print(": ");
-  Serial.print(sensorid_2);
+  Serial.print(sensorSamples[1]);
   Serial.println(" (humidity)");
 }
-#endif
-
-// ******************** LDR
-#ifdef SENSORTYPE_LDR
-void initSensor_LDR() {
-  // Start up the sensors
-  Serial.println("Setting pinMode to INPUT for LDR sensors");
-  pinMode(LDR_PIN, INPUT);
-}
-
-void readData_LDR() {
-  sensorCount = 1;
-  ldr = analogRead(LDR_PIN);
-}
-
-void printData_LDR() {
-  Serial.print("LDR Reading: "); 
-  Serial.println(ldr);
-}
-#endif
-
-
 
 
 /** 
@@ -824,17 +821,22 @@ void setup() {
   EEPROM.begin(sizeof configuration + sizeof wifi_data + 10);
   EEPROM.get(0, configuration);
   
-  if (configuration.version != 2) {
+  if (configuration.version != CONFIGURATION_VERSION) {
     Serial.println("Setting standard configuration");
-    configuration.version = 2;
+    configuration.version = CONFIGURATION_VERSION;
     strcpy(configuration.endpoint, "");
     strcpy(configuration.jwt, "");
-    strcpy(configuration.sensorid_1, "");
-    strcpy(configuration.sensorid_2, "");
+    strcpy(configuration.sensorType, "");
     configuration.delayPrint = DEFAULT_DELAY_PRINT;
     configuration.delayPoll = DEFAULT_DELAY_POLL;
     configuration.delayPost = DEFAULT_DELAY_POST;
     EEPROM.put(0, configuration);
+
+    strcpy(wifi_data.ssid, "");
+    strcpy(wifi_data.password, "");
+    wifi_data.keep_ap_on = false;
+    EEPROM.put(sizeof configuration, wifi_data);
+    
     EEPROM.commit();
   }
   Serial.print("Read data from EEPROM - endpoint <");
@@ -850,23 +852,21 @@ void setup() {
   Serial.print("> delay post <");
   Serial.print(configuration.delayPost);
   Serial.println(">");
-#ifdef SENSORTYPE_DHT22
-  Serial.print("Using DHT22 on pin <");
-  Serial.print(DHT_PIN);
-  Serial.print("> with temp. name <");
-  Serial.print(configuration.sensorid_1);
-  Serial.print("> and hum name <");
-  Serial.print(configuration.sensorid_2);
-  Serial.println(">");
-#endif
-#ifdef SENSORTYPE_DS18B20
-  Serial.print("Using DS18B20 on pins <");
-  for (uint8_t i=0; i<sizeof(DS18B20_PINS) / sizeof(uint8_t); i++) {
-    if (i > 0) Serial.print(", ");
-    Serial.print(DS18B20_PINS[i]);
+  
+  if (isSensorTypeDS18B20()) {
+    Serial.print("Using DS18B20 on pins <");
+    for (uint8_t i=0; i<sizeof(sensorPins) / sizeof(uint8_t); i++) {
+      if (i > 0) Serial.print(", ");
+      Serial.print(sensorPins[i]);
+    }
+    Serial.println(">");
+  } else if (isSensorTypeDHT22()) {
+    Serial.print("Using DHT22 on pin <");
+    Serial.print(sensorPins[0]);
+    Serial.println(">");
+  } else {
+    Serial.println("Undefined sensor type set...");
   }
-  Serial.println(">");
-#endif
   
   // init networking
   initNetworking();
@@ -886,22 +886,14 @@ void setup() {
 #endif
 
   yield();
-#ifdef SENSORTYPE_DS18B20
-  // initialize DS18B20 temp sensors
-  initSensor_DS18B20();
+  if (isSensorTypeDS18B20()) {
+    // initialize DS18B20 temp sensors
+    initSensor_DS18B20();
+  } else if (isSensorTypeDHT22()) {
+    // initialize DHT22 temp sensor
+    initSensor_DHT22();
+  }
   yield();
-#endif
-
-#ifdef SENSORTYPE_DHT22
-  // initialize DHT22 temp sensor
-  initSensor_DHT22();
-  yield();
-#endif
-
-#ifdef SENSORTYPE_LDR
-  initSensor_LDR();
-  yield();
-#endif
 }
 
 
@@ -936,9 +928,11 @@ void loop() {
     yield();
     justReset = false;
     
-    // get your MAC address
+    // get your MAC address and IP
     char mac_addr[20];
     getMacAddressString(mac_addr);
+    char ip[16];
+    getIpAddressString(ip);
 
     // build payload
     StaticJsonDocument<256> doc;
@@ -946,6 +940,7 @@ void loop() {
     doc["deviceId"].set(mac_addr);
     JsonObject jsonData = doc.createNestedObject("data"); 
     jsonData["restart"] = true;
+    jsonData["ip"].set(ip);
     
     // serialize
     uint8_t jsonLength = measureJson(doc) + 1; 
@@ -966,18 +961,11 @@ void loop() {
     startedRead = true;
 
     // read ds18b20 data
-    #ifdef SENSORTYPE_DS18B20
+    if (isSensorTypeDS18B20()) {
       readData_DS18B20();
-    #endif
-
-    #ifdef SENSORTYPE_DHT22
+    } else if (isSensorTypeDHT22()) {
       readData_DHT22();
-    #endif
-
-    // read ldr
-    #ifdef SENSORTYPE_LDR
-      readData_LDR();
-    #endif
+    }
 
     #ifdef PIN_WATCHDOG
     // pat the watchdog
