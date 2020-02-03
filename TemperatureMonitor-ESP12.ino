@@ -16,8 +16,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20200131T1100"
-#define VERSION_LASTCHANGE "One codebase for dht22 and ds18b20 sensors v2"
+#define VERSION_NUMBER "20200203T1500"
+#define VERSION_LASTCHANGE "Fix lengths when multiple ds18b20 sensors are present. Added more yields for stability."
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -242,13 +242,13 @@ void webHandle_GetHttpStatus() {
 void webHandle_GetData() {
   char str_temp[8];
   char str_hum[8];
+  uint8_t sensorCount = getSensorCount();
   
-  char response[400];
+  char response[400 + sensorCount * 100];
   webHeader(response, true, "Data");
   strcat(response, "<div class=\"position menuitem\">");
 
   if (isSensorTypeDS18B20()) {
-    uint8_t sensorCount = getSensorCount();
     if (sensorCount > 0) {
       for (uint8_t i=0; i<sensorCount; i++) {
         dtostrf(sensorSamples[i], 6, TEMP_DECIMALS, str_temp);
@@ -476,6 +476,7 @@ void initNetworking() {
     delay(500);
     server.handleClient();
     Serial.print(".");
+    yield();
   }
   Serial.print("\n");
   Serial.print("WiFi connection established - IP address: ");
@@ -519,11 +520,12 @@ void initNetworking() {
 void sendData(char* data) {
   // prepare headers
   uint16_t contentLength = strlen(data) + 4;
-  char str_contentLength[4];
-  sprintf (str_contentLength, "%03i", contentLength);
+  char str_contentLength[5];
+  sprintf (str_contentLength, "%4i", contentLength);
   
 #ifdef NETWORK_WIFI
   // send
+  yield();
   HTTPClient http;
   char server[70];
   strcpy(server, "http://");
@@ -539,13 +541,15 @@ void sendData(char* data) {
   http.addHeader("Content-Length", str_contentLength);
   http.addHeader("X-SensorCentral-Version", VERSION_NUMBER);
   http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
+  yield();
 
   // post data and show respponse
   lastHttpResponseCode = http.POST(data);
   http.getString().toCharArray(lastHttpResponse, 2048, 0);
   Serial.print("Received response code: "); Serial.println(lastHttpResponseCode);
   Serial.print("Received payload: "); Serial.println(lastHttpResponse);
-
+  yield();
+  
   // end http
   http.end();
 #endif
@@ -586,6 +590,7 @@ void sendData(char* data) {
 
   // done
   Serial.println("Sent to server...");
+  yield();
 }
 
 bool isConnectedToNetwork() {
@@ -594,6 +599,7 @@ bool isConnectedToNetwork() {
   if (WiFi.status() != WL_CONNECTED) {
     initNetworking();
   }
+  yield();
   return true;
 #endif
 
@@ -712,10 +718,12 @@ void readData_DS18B20() {
   for (uint8_t i=0; i<sizeof(sensorPins)/sizeof(uint8_t); i++) {
     OneWire oneWire(sensorPins[i]);
     DallasTemperature sensors(&oneWire);
+    yield();
     
     // begin to scan for change in sensors
     sensors.begin();
     sensors.setResolution(DS18B20_TEMP_PRECISION);
+    yield();
     
     // get count
     uint8_t sensorCount = sensorsPerPin[i];
@@ -736,6 +744,7 @@ void readData_DS18B20() {
     if (sensorCount > 0) {
       // request temperatures and store
       sensors.requestTemperatures();
+      yield();
       
       // get addresses
       for (uint8_t j=0; j<sensorsPerPin[i]; j++) {
@@ -743,6 +752,7 @@ void readData_DS18B20() {
         strcpy(sensorIds[indexTempAddress], ds18b20AddressToString(sensorAddresses[indexTempAddress]));
         sensorSamples[indexTempAddress] = sensors.getTempCByIndex(j);
         indexTempAddress++;
+        yield();
       }
     }
   }
@@ -1022,6 +1032,7 @@ void loop() {
     
     // prepare post data
     char* jsonData = preparePayload();
+    yield();
     
     // send payload
     sendData(jsonData);
