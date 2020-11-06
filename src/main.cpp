@@ -1,4 +1,4 @@
-#include "vars.h"
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include <Adafruit_Sensor.h>
@@ -6,6 +6,7 @@
 #include <DallasTemperature.h>
 #include <DHT.h>
 #include <DHT_U.h>
+#include "vars.h"
 #ifdef NETWORK_ETHERNET
   #include <SPI.h>
   #include <Ethernet.h>
@@ -16,8 +17,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20200203T1500"
-#define VERSION_LASTCHANGE "Fix lengths when multiple ds18b20 sensors are present. Added more yields for stability."
+#define VERSION_NUMBER "20201105T1820"
+#define VERSION_LASTCHANGE "Converting to PlatformIO"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -89,16 +90,16 @@ bool isSensorTypeDHT22() {
   return strcmp(configuration.sensorType, "DHT22") == 0;
 }
 
+uint8_t getSensorCount() {
+  uint8_t result = 0;
+  for (uint8_t i=0; i<sizeof(sensorsPerPin)/sizeof(uint8_t); i++) {
+    result += sensorsPerPin[i];
+  }
+  return result;
+}
 
 bool hasWebEndpoint() {
   return strcmp(configuration.endpoint, "") != 0;
-}
-
-void buildNetworkName(char* buffer) {
-  char mac_addr[18];
-  getMacAddressStringNoColon(mac_addr);
-  strcpy(buffer, "SensorCentral-");
-  strcat(buffer, mac_addr);
 }
 
 /**
@@ -142,16 +143,22 @@ void printMacAddress() {
   Serial.println(buf);
 }
 
+void buildNetworkName(char* buffer) {
+  char mac_addr[18];
+  getMacAddressStringNoColon(mac_addr);
+  strcpy(buffer, "SensorCentral-");
+  strcat(buffer, mac_addr);
+}
+
 /**
  * Convert IP address to a char buffer.
  */
 IPAddress* getIpAddress() {
-  IPAddress ip;
   #ifdef NETWORK_WIFI
-    ip = WiFi.localIP();
+    IPAddress ip = WiFi.localIP();
   #endif
   #ifdef NETWORK_ETHERNET
-    ip = Ethernet.localIP();
+    IPAddress ip = Ethernet.localIP();
   #endif
   return &ip;
 }
@@ -184,7 +191,7 @@ void printIpAddress() {
 
 
 // *** WEB SERVER
-void webHeader(char* buffer, bool back, char* title) {
+void webHeader(char* buffer, bool back, const char* title) {
   strcpy(buffer, "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"initial-scale=1.0\"><title>SensorCentral</title><link rel=\"stylesheet\" href=\"./styles.css\"></head><body>");
   if (back) strcat(buffer, "<div class=\"position\"><a href=\"./\">Back</a></div>");
   strcat(buffer, "<div class=\"position title\">");
@@ -195,19 +202,6 @@ void webHeader(char* buffer, bool back, char* title) {
 void webRestarting(char* buffer) {
   webHeader(buffer, false, "Restarting");
   strcat(buffer, "</body></html>");
-}
-
-void initWebserver() {
-  server.on("/", HTTP_GET, webHandle_GetRoot);
-  server.on("/data.html", HTTP_GET, webHandle_GetData);
-  server.on("/sensorconfig.html", HTTP_GET, webHandle_GetSensorConfig);
-  server.on("/sensor", HTTP_POST, webHandle_PostSensorForm);
-  server.on("/wificonfig.html", HTTP_GET, webHandle_GetWifiConfig);
-  server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
-  server.on("/httpstatus.html", HTTP_GET, webHandle_GetHttpStatus);
-  server.on("/styles.css", HTTP_GET, webHandle_GetStyles);
-  server.onNotFound(webHandle_NotFound);  
-  
 }
 
 void webHandle_GetRoot() {
@@ -447,6 +441,19 @@ void webHandle_NotFound(){
   server.send(404, "text/plain", "404: Not found");
 }
 
+void initWebserver() {
+  server.on("/", HTTP_GET, webHandle_GetRoot);
+  server.on("/data.html", HTTP_GET, webHandle_GetData);
+  server.on("/sensorconfig.html", HTTP_GET, webHandle_GetSensorConfig);
+  server.on("/sensor", HTTP_POST, webHandle_PostSensorForm);
+  server.on("/wificonfig.html", HTTP_GET, webHandle_GetWifiConfig);
+  server.on("/wifi", HTTP_POST, webHandle_PostWifiForm);
+  server.on("/httpstatus.html", HTTP_GET, webHandle_GetHttpStatus);
+  server.on("/styles.css", HTTP_GET, webHandle_GetStyles);
+  server.onNotFound(webHandle_NotFound);  
+  
+}
+
 void initNetworking() {
 #ifdef NETWORK_WIFI
   // read wifi config from eeprom
@@ -621,21 +628,6 @@ void debugWebServer(char* buffer) {
 #endif
 }
 
-/**
- * Prints the data to the serial console.
- */
-void printData() {
-  Serial.println("------------------------");
-  
-  if (isSensorTypeDS18B20()) {
-    printData_DS18B20();
-  } else if (isSensorTypeDHT22()) {
-    printData_DHT22();
-  }
-    
-  Serial.println("Printed available data");
-}
-
 char* preparePayload() {
   // create document
   StaticJsonDocument<2048> doc;
@@ -657,19 +649,10 @@ char* preparePayload() {
   }
 
   // serialize
-  uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
+  //uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
   char jsonBuffer[2048];
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
   return jsonBuffer;
-}
-
-
-uint8_t getSensorCount() {
-  uint8_t result = 0;
-  for (uint8_t i=0; i<sizeof(sensorsPerPin)/sizeof(uint8_t); i++) {
-    result += sensorsPerPin[i];
-  }
-  return result;
 }
 
 // ******************** DS18B20
@@ -699,7 +682,7 @@ void initSensor_DS18B20() {
 
 char* ds18b20AddressToString(DeviceAddress deviceAddress) {
     static char return_me[18];
-    static char *hex = "0123456789ABCDEF";
+    static char hex[] = "0123456789ABCDEF";
     uint8_t i, j;
 
     for (i=0, j=0; i<8; i++) {
@@ -811,6 +794,27 @@ void printData_DHT22() {
   Serial.print(": ");
   Serial.print(sensorSamples[1]);
   Serial.println(" (humidity)");
+}
+
+/** 
+ *  ********************************************
+ *  COMMON
+ *  ********************************************
+ */
+
+/**
+ * Prints the data to the serial console.
+ */
+void printData() {
+  Serial.println("------------------------");
+  
+  if (isSensorTypeDS18B20()) {
+    printData_DS18B20();
+  } else if (isSensorTypeDHT22()) {
+    printData_DHT22();
+  }
+    
+  Serial.println("Printed available data");
 }
 
 
