@@ -1,35 +1,31 @@
+//
+// !!! WARNING !!! AUTO-GENERATED FILE!
+// PLEASE DO NOT MODIFY IT AND USE "platformio.ini":
+// https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags
+//
 {
     "configurations": [
         {
-            "name": "!!! WARNING !!! AUTO-GENERATED FILE, PLEASE DO NOT MODIFY IT AND USE https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags"
-        },
-        {
-            "name": "Mac",
-            "macFrameworkPath": [],
+            "name": "PlatformIO",
             "includePath": [
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/include",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/src",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/include",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Ethernet/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/SPI",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WebServer/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266HTTPClient/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WiFi/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/EEPROM",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DallasTemperature",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/OneWire",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT sensor library",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit Unified Sensor",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/ArduinoJson/src",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/DallasTemperature",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/OneWire",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT sensor library",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit Unified Sensor",
+                "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/ArduinoJson/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/include",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/libc/xtensa-lx106-elf/include",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/cores/esp8266",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/lwip2/include",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/variants/nodemcu",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit DHT Unified",
-                "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT/src",
-                "/Users/mheisterberg/.platformio/lib/Adafruit BusIO_ID6214",
-                "/Users/mheisterberg/.platformio/lib/Adafruit GFX Library_ID13",
-                "/Users/mheisterberg/.platformio/lib/PubSubClient_ID89/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ArduinoOTA",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/DNSServer/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266AVRISP/src",
@@ -53,35 +49,29 @@
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Ticker/src",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Wire",
                 "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/esp8266/src",
-                "/Users/mheisterberg/.platformio/packages/tool-unity",
                 ""
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/include",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/src",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/include",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Ethernet/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/SPI",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WebServer/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266HTTPClient/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WiFi/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/EEPROM",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DallasTemperature",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/OneWire",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT sensor library",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit Unified Sensor",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/ArduinoJson/src",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/DallasTemperature",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/OneWire",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT sensor library",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit Unified Sensor",
+                    "/Users/mheisterberg/Programming/repos/TemperatureMonitor-ESP12/.pio/libdeps/dev/ArduinoJson/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/include",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/libc/xtensa-lx106-elf/include",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/cores/esp8266",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/tools/sdk/lwip2/include",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/variants/nodemcu",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/Adafruit DHT Unified",
-                    "/Users/mheisterberg/Documents/Arduino/TemperatureMonitor-ESP12/.pio/libdeps/dev/DHT/src",
-                    "/Users/mheisterberg/.platformio/lib/Adafruit BusIO_ID6214",
-                    "/Users/mheisterberg/.platformio/lib/Adafruit GFX Library_ID13",
-                    "/Users/mheisterberg/.platformio/lib/PubSubClient_ID89/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ArduinoOTA",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/DNSServer/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266AVRISP/src",
@@ -105,12 +95,11 @@
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Ticker/src",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/Wire",
                     "/Users/mheisterberg/.platformio/packages/framework-arduinoespressif8266/libraries/esp8266/src",
-                    "/Users/mheisterberg/.platformio/packages/tool-unity",
                     ""
                 ]
             },
             "defines": [
-                "PLATFORMIO=50002",
+                "PLATFORMIO=60105",
                 "ESP8266",
                 "ARDUINO_ARCH_ESP8266",
                 "ARDUINO_ESP8266_ESP12",
@@ -128,7 +117,6 @@
                 "VTABLES_IN_FLASH",
                 ""
             ],
-            "intelliSenseMode": "clang-x64",
             "cStandard": "c99",
             "cppStandard": "c++11",
             "compilerPath": "/Users/mheisterberg/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-gcc",

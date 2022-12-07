@@ -17,8 +17,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20201105T1820"
-#define VERSION_LASTCHANGE "Converting to PlatformIO"
+#define VERSION_NUMBER "20221117T1320"
+#define VERSION_LASTCHANGE "Binary sensor and send deviceData"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -37,11 +37,11 @@
 #define HUM_DECIMALS 4                  // 4 decimals of output
 
 // define struct to hold general config
-#define CONFIGURATION_VERSION 3
+#define CONFIGURATION_VERSION 4
 struct {
   uint8_t version = CONFIGURATION_VERSION;
   char endpoint[64] = "";
-  char jwt[512] = "";
+  char jwt[650] = "";
   char sensorType[36] = "";
   unsigned long delayPrint = 0L;
   unsigned long delayPoll = 0L;
@@ -88,6 +88,9 @@ bool isSensorTypeDS18B20() {
 }
 bool isSensorTypeDHT22() {
   return strcmp(configuration.sensorType, "DHT22") == 0;
+}
+bool isSensorTypeBINARY() {
+  return strcmp(configuration.sensorType, "BINARY") == 0;
 }
 
 uint8_t getSensorCount() {
@@ -264,6 +267,8 @@ void webHandle_GetData() {
     strcat(response, "&deg;C<br/>Humidity: ");
     strcat(response, str_hum);
     strcat(response, "%");
+  } else if (isSensorTypeBINARY()) {
+    strcat(response, "Binary sensor: ON");
   }
 
   strcat(response, "</div></body></html>");
@@ -317,7 +322,7 @@ void webHandle_GetSensorConfig() {
   strcat(response, "<tr><td align=\"left\">Delay, post</td><td><input type=\"text\" name=\"post\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">Endpoint</td><td><input type=\"text\" name=\"endpoint\" autocomplete=\"off\"></input></td></tr>");
   strcat(response, "<tr><td align=\"left\">JWT</td><td><input type=\"text\" name=\"jwt\" autocomplete=\"off\"></input></td></tr>");
-  strcat(response, "<tr><td align=\"left\">Sensor type</td><td><select name=\"sensortype\"><option>DS18B20</option><option>DHT22</option></select></td></tr>");
+  strcat(response, "<tr><td align=\"left\">Sensor type</td><td><select name=\"sensortype\"><option>DS18B20</option><option>DHT22</option><option>BINARY</option></select></td></tr>");
   strcat(response, "<tr><td colspan=\"2\" align=\"right\"><input type=\"submit\"></input></td></tr>");
   strcat(response, "</table>");
 
@@ -328,12 +333,15 @@ void webHandle_GetSensorConfig() {
 
 void webHandle_PostSensorForm() {
   bool didUpdate = false;
+  Serial.println("Received POST for sensor config");
 
   if (server.arg("print").length() > 0) {
     unsigned long larg = atol(server.arg("print").c_str());
     if (larg != 0) {
       configuration.delayPrint = larg;
       didUpdate = true;
+      Serial.print("Delay print: ");
+      Serial.println(larg);
     }
   }
   if (server.arg("poll").length() > 0) {
@@ -341,6 +349,8 @@ void webHandle_PostSensorForm() {
     if (larg != 0) {
       configuration.delayPoll = larg;
       didUpdate = true;
+      Serial.print("Delay poll: ");
+      Serial.println(larg);
     }
   }
   if (server.arg("post").length() > 0) {
@@ -348,19 +358,27 @@ void webHandle_PostSensorForm() {
     if (larg != 0) {
       configuration.delayPost = larg;
       didUpdate = true;
+      Serial.print("Delay post: ");
+      Serial.println(larg);
     }
   }
   if (server.arg("endpoint").length() > 0) {
     strcpy(configuration.endpoint, server.arg("endpoint").c_str());
     didUpdate = true;
+    Serial.print("Endpoint: ");
+    Serial.println(configuration.endpoint);
   }
   if (server.arg("jwt").length() > 0) {
     strcpy(configuration.jwt, server.arg("jwt").c_str());
     didUpdate = true;
+    Serial.print("JWT: ");
+    Serial.println(configuration.jwt);
   }
   if (server.arg("sensortype").length() > 0) {
     strcpy(configuration.sensorType, server.arg("sensortype").c_str());
     didUpdate = true;
+    Serial.print("Sensor type: ");
+    Serial.println(configuration.sensorType);
   }
 
   if (didUpdate) {
@@ -401,10 +419,19 @@ void webHandle_GetWifiConfig() {
 }
 
 void webHandle_PostWifiForm() {
+  Serial.println("Received POST with wifi data");
   if (!server.hasArg("ssid") || !server.hasArg("password") || server.arg("ssid") == NULL || server.arg("password") == NULL) {
     server.send(417, "text/plain", "417: Invalid Request");
     return;
   }
+
+  // log
+  Serial.print("SSID: ");
+  Serial.println(server.arg("ssid"));
+  Serial.print("Password: ");
+  Serial.println(server.arg("password"));
+  Serial.print("Keep AP on: ");
+  Serial.println(server.arg("keep_ap_on"));
 
   // save to eeprom
   server.arg("ssid").toCharArray(wifi_data.ssid, 20);
@@ -463,10 +490,6 @@ void initNetworking() {
   // start AP
   char ssid[32];
   buildNetworkName(ssid);
-  char mac_addr[18];
-  getMacAddressStringNoColon(mac_addr);
-  strcpy(ssid, "SensorCentral-");
-  strcat(ssid, mac_addr);
   WiFi.softAP(ssid, "");
   Serial.print("Started AP on IP: ");
   Serial.println(WiFi.softAPIP());
@@ -632,13 +655,17 @@ char* preparePayload() {
   // create document
   StaticJsonDocument<2048> doc;
   
-  // get your MAC address
+  // get your IP and MAC address
   char mac_addr[20];
   getMacAddressString(mac_addr);
+  char ip_addr[16];
+  getIpAddressString(ip_addr);
 
   // build payload
   doc["msgtype"] = "data";
   doc["deviceId"].set(mac_addr);
+  JsonObject deviceData = doc.createNestedObject("deviceData");
+  deviceData["ip"] = ip_addr;
   JsonArray jsonData = doc.createNestedArray("data");
 
   // loop sensors and add data
@@ -796,6 +823,25 @@ void printData_DHT22() {
   Serial.println(" (humidity)");
 }
 
+// ******************** BINARY
+void initSensor_BINARY() {
+  // Start up the sensors
+  sensorsPerPin[0] = 1;
+  getMacAddressStringNoColon(sensorIds[0]);
+  strcat(sensorIds[0], "_binary");
+  Serial.println("Initializing BINARY sensor");
+  Serial.print("ID <");
+  Serial.print(sensorIds[0]);
+  Serial.println(">");
+}
+void printData_BINARY() {
+  Serial.print("Printing data from BINARY sensor: ");
+  Serial.println("ON");
+}
+void readData_BINARY() {
+  sensorSamples[0] = 1;
+}
+
 /** 
  *  ********************************************
  *  COMMON
@@ -812,6 +858,8 @@ void printData() {
     printData_DS18B20();
   } else if (isSensorTypeDHT22()) {
     printData_DHT22();
+  } else if (isSensorTypeBINARY()) {
+    printData_BINARY();
   }
     
   Serial.println("Printed available data");
@@ -852,6 +900,7 @@ void setup() {
     EEPROM.put(sizeof configuration, wifi_data);
     
     EEPROM.commit();
+    yield();
   }
   Serial.print("Read data from EEPROM - endpoint <");
   Serial.print(configuration.endpoint);
@@ -878,6 +927,8 @@ void setup() {
     Serial.print("Using DHT22 on pin <");
     Serial.print(sensorPins[0]);
     Serial.println(">");
+  } else if (isSensorTypeBINARY()) {
+    Serial.print("Binary sensor - no pin");
   } else {
     Serial.println("Undefined sensor type set...");
   }
@@ -906,6 +957,9 @@ void setup() {
   } else if (isSensorTypeDHT22()) {
     // initialize DHT22 temp sensor
     initSensor_DHT22();
+  } else if (isSensorTypeBINARY()) {
+    // init binary sensor
+    initSensor_BINARY();
   }
   yield();
 }
@@ -979,6 +1033,8 @@ void loop() {
       readData_DS18B20();
     } else if (isSensorTypeDHT22()) {
       readData_DHT22();
+    } else if (isSensorTypeBINARY()) {
+      readData_BINARY();
     }
 
     #ifdef PIN_WATCHDOG
