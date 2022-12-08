@@ -3,3 +3,4 @@ coverage
 output
 network_config.h
 .pio
+devices

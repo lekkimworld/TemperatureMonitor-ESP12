@@ -17,8 +17,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20221117T1320"
-#define VERSION_LASTCHANGE "Binary sensor and send deviceData"
+#define VERSION_NUMBER "20221208T1130"
+#define VERSION_LASTCHANGE "Extend ssid size"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -54,7 +54,7 @@ struct {
 
   // define struct to hold wifi configuration
   struct { 
-    char ssid[20] = "";
+    char ssid[32] = "";
     char password[20] = "";
     bool keep_ap_on = false;
   } wifi_data;
@@ -434,7 +434,7 @@ void webHandle_PostWifiForm() {
   Serial.println(server.arg("keep_ap_on"));
 
   // save to eeprom
-  server.arg("ssid").toCharArray(wifi_data.ssid, 20);
+  server.arg("ssid").toCharArray(wifi_data.ssid, 32);
   server.arg("password").toCharArray(wifi_data.password, 20);
   wifi_data.keep_ap_on = (server.arg("keep_ap_on") && server.arg("keep_ap_on").charAt(0) == '1');
   EEPROM.put(sizeof configuration, wifi_data);
