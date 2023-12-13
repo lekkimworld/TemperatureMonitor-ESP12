@@ -17,8 +17,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20221208T1130"
-#define VERSION_LASTCHANGE "Extend ssid size"
+#define VERSION_NUMBER "20231213T1130"
+#define VERSION_LASTCHANGE "Reuse buffer for JSON"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -75,6 +75,7 @@ boolean justReset = true;
 uint8_t reconnect;
 int lastHttpResponseCode = 0;
 char lastHttpResponse[2048] = ""; 
+char jsonBuffer[2048];
 
 // sensor data
 uint8_t sensorPins[] = {14};
@@ -547,11 +548,13 @@ void initNetworking() {
   Serial.println(ip);
 }
 
-void sendData(char* data) {
+void sendData() {
   // prepare headers
-  uint16_t contentLength = strlen(data) + 4;
+  uint16_t contentLength = strlen(jsonBuffer) + 4;
   char str_contentLength[5];
   sprintf (str_contentLength, "%4i", contentLength);
+  Serial.print("Sending JSON: ");
+  Serial.println(jsonBuffer);
   
 #ifdef NETWORK_WIFI
   // send
@@ -560,6 +563,8 @@ void sendData(char* data) {
   char server[70];
   strcpy(server, "http://");
   strcat(server, configuration.endpoint);
+  Serial.print("Sending to server: ");
+  Serial.println(server);
   http.begin(server);
   http.addHeader("Content-Type", "application/json");
   if (strcmp(configuration.jwt, "") != 0) {
@@ -569,12 +574,14 @@ void sendData(char* data) {
     http.addHeader("Authorization", auth_header);
   }
   http.addHeader("Content-Length", str_contentLength);
+  Serial.print("Content-Length: ");
+  Serial.println(str_contentLength);
   http.addHeader("X-SensorCentral-Version", VERSION_NUMBER);
   http.addHeader("X-SensorCentral-LastChange", VERSION_LASTCHANGE);
   yield();
 
   // post data and show respponse
-  lastHttpResponseCode = http.POST(data);
+  lastHttpResponseCode = http.POST(jsonBuffer);
   http.getString().toCharArray(lastHttpResponse, 2048, 0);
   Serial.print("Received response code: "); Serial.println(lastHttpResponseCode);
   Serial.print("Received payload: "); Serial.println(lastHttpResponse);
@@ -651,7 +658,7 @@ void debugWebServer(char* buffer) {
 #endif
 }
 
-char* preparePayload() {
+void preparePayload() {
   // create document
   StaticJsonDocument<2048> doc;
   
@@ -676,10 +683,7 @@ char* preparePayload() {
   }
 
   // serialize
-  //uint16_t jsonLength = measureJson(doc) + 1; // add space for 0-termination
-  char jsonBuffer[2048];
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
-  return jsonBuffer;
 }
 
 // ******************** DS18B20
@@ -1011,12 +1015,10 @@ void loop() {
     jsonData["ip"].set(ip);
     
     // serialize
-    uint8_t jsonLength = measureJson(doc) + 1; 
-    char jsonBuffer[jsonLength];
     serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
     
     // send payload
-    sendData(jsonBuffer);
+    sendData();
     yield();
   }
 
@@ -1091,11 +1093,11 @@ void loop() {
     #endif
     
     // prepare post data
-    char* jsonData = preparePayload();
+    preparePayload();
     yield();
     
     // send payload
-    sendData(jsonData);
+    sendData();
   }
   yield();
 
