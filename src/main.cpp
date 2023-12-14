@@ -17,8 +17,8 @@
   #include <ESP8266WebServer.h>
 #endif
 
-#define VERSION_NUMBER "20231213T1130"
-#define VERSION_LASTCHANGE "Reuse buffer for JSON"
+#define VERSION_NUMBER "20231214T1030"
+#define VERSION_LASTCHANGE "Centralize formattting of samples"
 
 //#define PIN_WATCHDOG 13                 // pin where we connect to a 555 timer watch dog circuit
 //#define PIN_PRINT_LED 14
@@ -33,8 +33,8 @@
 #define DEFAULT_DELAY_POLL 10000L       // 
 #define DEFAULT_DELAY_POST 120000L      // 
 #define MAX_SENSORS 10                  // maximum number of sensors we can connect
-#define TEMP_DECIMALS 4                 // 4 decimals of output
-#define HUM_DECIMALS 4                  // 4 decimals of output
+#define TEMP_DECIMALS 1                 // 1 decimals of output
+#define HUM_DECIMALS 1                  // 1 decimals of output
 
 // define struct to hold general config
 #define CONFIGURATION_VERSION 4
@@ -92,6 +92,17 @@ bool isSensorTypeDHT22() {
 }
 bool isSensorTypeBINARY() {
   return strcmp(configuration.sensorType, "BINARY") == 0;
+}
+
+float copySensorValueToBuffer(uint8_t idx, char* buffer) {
+  
+  if (isSensorTypeBINARY()) {
+      // just use value
+      strcpy(buffer, sensorSamples[idx] ? "1" : "0");
+    } else {
+      // format value
+      dtostrf(sensorSamples[idx], 6, TEMP_DECIMALS, buffer);
+    }
 }
 
 uint8_t getSensorCount() {
@@ -239,7 +250,6 @@ void webHandle_GetHttpStatus() {
 
 void webHandle_GetData() {
   char str_temp[8];
-  char str_hum[8];
   uint8_t sensorCount = getSensorCount();
   
   char response[400 + sensorCount * 100];
@@ -249,8 +259,7 @@ void webHandle_GetData() {
   if (isSensorTypeDS18B20()) {
     if (sensorCount > 0) {
       for (uint8_t i=0; i<sensorCount; i++) {
-        dtostrf(sensorSamples[i], 6, TEMP_DECIMALS, str_temp);
-        
+        copySensorValueToBuffer(i, str_temp);
         strcat(response, sensorIds[i]);
         strcat(response, ": ");
         strcat(response, str_temp);
@@ -260,13 +269,12 @@ void webHandle_GetData() {
       strcat(response, "No DS18B20 sensors found on bus");
     }
   } else if (isSensorTypeDHT22()) {
-    dtostrf(sensorSamples[0], 6, TEMP_DECIMALS, str_temp);
-    dtostrf(sensorSamples[1], 6, HUM_DECIMALS, str_hum);
-    
     strcat(response, "Temperature: ");
+    copySensorValueToBuffer(0, str_temp);
     strcat(response, str_temp);
     strcat(response, "&deg;C<br/>Humidity: ");
-    strcat(response, str_hum);
+    copySensorValueToBuffer(1, str_temp);
+    strcat(response, str_temp);
     strcat(response, "%");
   } else if (isSensorTypeBINARY()) {
     strcat(response, "Binary sensor: ON");
@@ -678,7 +686,9 @@ void preparePayload() {
   // loop sensors and add data
   for (uint8_t i=0, k=getSensorCount(); i<k; i++) {
     JsonObject jsonSensorData = jsonData.createNestedObject();
-    jsonSensorData["sensorId"] = sensorIds[i];
+    jsonSensorData["sensorId"].set(sensorIds[i]);
+
+    // add value to json
     jsonSensorData["sensorValue"].set(sensorSamples[i]);
   }
 
@@ -775,10 +785,12 @@ void readData_DS18B20() {
 void printData_DS18B20() {
   uint8_t sensorCount = getSensorCount();
   if (sensorCount > 0) {
+    char str_temp[8];
     for (uint8_t i=0; i<sensorCount; i++) {
+      copySensorValueToBuffer(i, str_temp);
       Serial.print(sensorIds[i]);
       Serial.print(": ");
-      Serial.println(sensorSamples[i], TEMP_DECIMALS);
+      Serial.println(str_temp);
     }
   } else {
     Serial.println("No DS18B20 sensors found on bus");
@@ -816,14 +828,17 @@ void readData_DHT22() {
 }
 
 void printData_DHT22() {
+  char str_temp[8];
   Serial.println("Printing data from DHT22 sensor");
   Serial.print(sensorIds[0]);
   Serial.print(": ");
-  Serial.print(sensorSamples[0]);
+  copySensorValueToBuffer(0, str_temp);
+  Serial.print(str_temp);
   Serial.println(" (temperature)");
   Serial.print(sensorIds[1]);
   Serial.print(": ");
-  Serial.print(sensorSamples[1]);
+  copySensorValueToBuffer(1, str_temp);
+  Serial.print(str_temp);
   Serial.println(" (humidity)");
 }
 
